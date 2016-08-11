@@ -243,6 +243,7 @@ init_screen (rp_screen *s, int screen_num)
   struct sbuf *buf;
   int xine_screen_num;
   char *colon;
+  long win_type[1];
 
   win_type[0] = _net_wm_window_type_dock;
 
