@@ -1,4 +1,4 @@
-/* Read kdb input from the user.
+/* Read keyboard input from the user.
  * Copyright (C) 2000, 2001, 2002, 2003, 2004 Shawn Betts <sabetts@vcn.bc.ca>
  *
  * This file is part of ratpoison.
@@ -28,6 +28,10 @@
 #include <X11/Xutil.h>
 
 #include "ratpoison.h"
+
+#ifdef HAVE_X11_XKBLIB_H
+#include <X11/XKBlib.h>
+#endif
 
 /* Convert an X11 modifier mask to the rp modifier mask equivalent, as
    best it can (the X server may not have a hyper key defined, for
@@ -73,6 +77,52 @@ rp_mask_to_x11_mask (unsigned int mask)
   return result;
 }
 
+static Bool use_xkb;
+
+void
+init_xkb (void)
+{
+#if defined (WANT_XKB) && defined (HAVE_X11_XKBLIB_H) && defined (HAVE_XKBKEYCODETOKEYSYM)
+  int error, event, major, minor, opcode;
+
+  major = XkbMajorVersion;
+  minor = XkbMajorVersion;
+
+  use_xkb = XkbLibraryVersion (&major, &minor);
+  if (!use_xkb)
+    {
+      PRINT_ERROR (("Not using XKB, compile and load time version mismatch:"));
+      PRINT_ERROR ((" (%d, %d) vs. (%d, %d)\n", XkbMajorVersion,
+                    XkbMajorVersion, major, minor));
+      return;
+    }
+
+  use_xkb = XkbQueryExtension (dpy, &opcode, &event, &error, &major, &minor);
+  if (!use_xkb)
+    PRINT_DEBUG (("Not using XKB, XkbQueryExtension failed\n"));
+#else
+  PRINT_DEBUG (("Built with no XKB support."));
+  use_xkb = False;
+#endif
+}
+
+KeySym
+keycode_to_keysym(Display *dpy, KeyCode kc, int group, int level)
+{
+  /*
+   * XKeycodeToKeysym has been deprecated upstream, however we still use
+   * it since XKB may not be available at build time or and not
+   * functional at runtime. The problems in XKeycodeToKeysym don't seem
+   * to matter in the ratpoison case anyway.
+   * https://bugs.freedesktop.org/show_bug.cgi?id=5349
+   */
+#if defined (WANT_XKB) && defined (HAVE_X11_XKBLIB_H) && defined (HAVE_XKBKEYCODETOKEYSYM)
+  if (use_xkb)
+    return XkbKeycodeToKeysym (dpy, kc, group, level);
+#endif
+  (void) group;
+  return XKeycodeToKeysym (dpy, kc, level);
+}
 
 /* /\* The caller is responsible for freeing the keycodes. *\/ */
 /* KeyCode * */
@@ -90,7 +140,7 @@ rp_mask_to_x11_mask (unsigned int mask)
 /* 			      &syms_per_code); */
 
 /*   *n_returned = 0; */
-/*   codes = (KeyCode *)xmalloc (sizeof(KeyCode) * n_returned); */
+/*   codes = xmalloc (sizeof(KeyCode) * n_returned); */
 /*   for (code = min_code; code < max_code; code++) */
 /*     for (code_col = 0; code_col < syms_per_code; code_col++) */
 /*       {       */
@@ -99,7 +149,7 @@ rp_mask_to_x11_mask (unsigned int mask)
 /* 	if (sym == s) */
 /* 	  { */
 /* 	    n_returned++; */
-/* 	    codes = (KeyCode *)xrealloc (sizeof(KeyCode) * n_returned); */
+/* 	    codes = xrealloc (sizeof(KeyCode) * n_returned); */
 /* 	    codes[n_returned-1] = code; */
 /* 	  } */
 /*       }	 */
@@ -251,8 +301,8 @@ keysym_to_keycode_mod (KeySym keysym, KeyCode *code, unsigned int *mod)
 
   *mod = 0;
   *code = XKeysymToKeycode (dpy, keysym);
-  lower = XKeycodeToKeysym (dpy, *code, 0);
-  upper = XKeycodeToKeysym (dpy, *code, 1);
+  lower = keycode_to_keysym (dpy, *code, 0, 0);
+  upper = keycode_to_keysym (dpy, *code, 0, 1);
   /* If you need to press shift to get the keysym, add the shift
      mask. */
   if (upper == keysym && lower != keysym)
@@ -302,7 +352,6 @@ grab_key (KeySym keysym, unsigned int modifiers, Window grab_window)
 char *
 keysym_to_string (KeySym keysym, unsigned int modifier)
 {
-  static char *null_string = "NULL"; /* A NULL string. */
   struct sbuf *name;
   char *tmp;
 
@@ -319,15 +368,11 @@ keysym_to_string (KeySym keysym, unsigned int modifier)
      can return NULL. In this case use the "NULL" string. */
   tmp = XKeysymToString (keysym);
   if (tmp == NULL)
-    tmp = null_string;
+    tmp = "NULL";
 
   sbuf_concat (name, tmp);
 
-  /* Eat the nut and throw away the shells. */
-  tmp = sbuf_get (name);
-  free (name);
-
-  return tmp;
+  return sbuf_free_struct (name);
 }
 
 /* Cooks a keycode + modifier into a keysym + modifier. This should be
@@ -362,8 +407,8 @@ cook_keycode (XKeyEvent *ev, KeySym *keysym, unsigned int *mod, char *keysym_nam
   /* Find out if XLookupString gobbled the shift modifier */
   if (ev->state & ShiftMask)
     {
-      lower = XKeycodeToKeysym (dpy, ev->keycode, 0);
-      upper = XKeycodeToKeysym (dpy, ev->keycode, 1);
+      lower = keycode_to_keysym (dpy, ev->keycode, 0, 0);
+      upper = keycode_to_keysym (dpy, ev->keycode, 0, 1);
       /* If the keysym isn't affected by the shift key, then keep the
          shift modifier. */
       if (lower == upper)
@@ -383,7 +428,7 @@ cook_keycode (XKeyEvent *ev, KeySym *keysym, unsigned int *mod, char *keysym_nam
 
 /* Wait for a key and discard it. */
 void
-read_any_key ()
+read_any_key (void)
 {
   char buffer[513];
   unsigned int mod;
@@ -428,15 +473,22 @@ read_key (KeySym *keysym, unsigned int *modifiers, char *keysym_name, int len)
 static void
 update_input_window (rp_screen *s, rp_input_line *line)
 {
-  int   prompt_width = rp_text_width (s, defaults.font, line->prompt, -1);
-  int   input_width  = rp_text_width (s, defaults.font, line->buffer, line->length);
-  int   total_width;
+  int prompt_width, input_width, total_width;
+  int char_len = 0, height;
   GC lgc;
   XGCValues gcv;
-  int height;
 
+  prompt_width = rp_text_width (s, line->prompt, -1);
+  input_width  = rp_text_width (s, line->buffer, line->length);
   total_width = defaults.bar_x_padding * 2 + prompt_width + input_width + MAX_FONT_WIDTH (defaults.font);
   height = (FONT_HEIGHT (s) + defaults.bar_y_padding * 2);
+
+  if (RP_IS_UTF8_START (line->buffer[line->position]))
+    do
+      char_len++;
+    while (RP_IS_UTF8_CONT (line->buffer[line->position + char_len]));
+  else
+    char_len = 1;
 
   if (total_width < defaults.input_window_size + prompt_width)
     {
@@ -475,11 +527,12 @@ update_input_window (rp_screen *s, rp_input_line *line)
   gcv.foreground = s->fg_color ^ s->bg_color;
   lgc = XCreateGC (dpy, s->input_window, GCFunction | GCForeground, &gcv);
 
-  /* Draw a cheap-o cursor - MkII */
+  /* Draw a cheap-o cursor - MkIII */
   XFillRectangle (dpy, s->input_window, lgc,
-		  defaults.bar_x_padding + prompt_width + rp_text_width (s, defaults.font, line->buffer, line->position),
+		  defaults.bar_x_padding + prompt_width +
+		  rp_text_width (s, line->buffer, line->position),
                   defaults.bar_y_padding,
-		  rp_text_width (s, defaults.font, &line->buffer[line->position], 1),
+		  rp_text_width (s, &line->buffer[line->position], char_len),
                   FONT_HEIGHT (s));
 
   XFlush (dpy);
@@ -504,17 +557,8 @@ ring_bell (void)
   XFillRectangle (dpy, s->input_window, lgc, 0, 0, attr.width, attr.height);
   XFlush (dpy);
 
-#ifdef HAVE_USLEEP
   usleep (15000);
-#else
-  {
-    struct timeval tv;
 
-    tv.tv_sec = 0;
-    tv.tv_usec = 15000;
-    select (0, NULL, NULL, NULL, &tv);
-  }
-#endif
   XFillRectangle (dpy, s->input_window, lgc, 0, 0, attr.width, attr.height);
   XFlush (dpy);
   XFreeGC (dpy, lgc);
@@ -535,8 +579,6 @@ get_more_input (char *prompt, char *preinput, int history_id,
 {
   /* Emacs 21 uses a 513 byte string to store the keysym name. */
   char keysym_buf[513];
-  int keysym_bufsize = sizeof (keysym_buf);
-  int nbytes;
   rp_screen *s = current_screen ();
   KeySym ch;
   unsigned int modifier;
@@ -544,7 +586,7 @@ get_more_input (char *prompt, char *preinput, int history_id,
   char *final_input;
   edit_status status;
   Window focus;
-  int revert;
+  int revert, done = 0;
 
   history_reset();
 
@@ -572,37 +614,41 @@ get_more_input (char *prompt, char *preinput, int history_id,
 
   update_input_window (s, line);
 
-  for (;;)
+  while (!done)
     {
-      nbytes = read_key (&ch, &modifier, keysym_buf, keysym_bufsize);
+      read_key (&ch, &modifier, keysym_buf, sizeof (keysym_buf));
       modifier = x11_mask_to_rp_mask (modifier);
-      PRINT_DEBUG (("ch = %ld, modifier = %d, keysym_buf = %s, keysym_bufsize = %d\n",
-                    ch, modifier, keysym_buf, keysym_bufsize));
+      PRINT_DEBUG (("ch = %ld, modifier = %d, keysym_buf = %s",
+                    ch, modifier, keysym_buf));
       status = execute_edit_action (line, ch, modifier, keysym_buf);
 
-      if (status == EDIT_DELETE || status == EDIT_INSERT || status == EDIT_MOVE
-          || status == EDIT_COMPLETE)
+      switch (status)
         {
+        case EDIT_COMPLETE:
+        case EDIT_DELETE:
+        case EDIT_INSERT:
+        case EDIT_MOVE:
           /* If the text changed (and we didn't just complete
              something) then set the virgin bit. */
           if (status != EDIT_COMPLETE)
             line->compl->virgin = 1;
           /* In all cases, we need to redisplay the input string. */
           update_input_window (s, line);
-        }
-      else if (status == EDIT_NO_OP)
-        {
+          break;
+        case EDIT_NO_OP:
           ring_bell ();
-        }
-      else if (status == EDIT_ABORT)
-        {
+          break;
+        case EDIT_ABORT:
           final_input = NULL;
+          done = 1;
           break;
-        }
-      else if (status == EDIT_DONE)
-        {
+        case EDIT_DONE:
           final_input = xstrdup (line->buffer);
+          done = 1;
           break;
+        default:
+          PRINT_ERROR (("Unhandled status %d; this is a *BUG*\n", status));
+          exit (EXIT_FAILURE);
         }
     }
 

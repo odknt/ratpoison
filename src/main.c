@@ -38,6 +38,14 @@
 
 #include "ratpoison.h"
 
+#ifdef HAVE_LANGINFO_CODESET
+# include <langinfo.h>
+#endif
+
+#if defined (HAVE_PWD_H) && defined (HAVE_GETPWUID)
+#include <pwd.h>
+#endif
+
 /* Several systems seem not to have WAIT_ANY defined, so define it if
    it isn't. */
 #ifndef WAIT_ANY
@@ -67,8 +75,10 @@ fatal (const char *msg)
 void *
 xmalloc (size_t size)
 {
-  register void *value = malloc (size);
-  if (value == 0)
+  void *value;
+
+  value = malloc (size);
+  if (value == NULL)
     fatal ("Virtual memory exhausted");
   return value;
 }
@@ -76,8 +86,10 @@ xmalloc (size_t size)
 void *
 xrealloc (void *ptr, size_t size)
 {
-  register void *value = realloc (ptr, size);
-  if (value == 0)
+  void *value;
+
+  value = realloc (ptr, size);
+  if (value == NULL)
     fatal ("Virtual memory exhausted");
   return value;
 }
@@ -87,7 +99,7 @@ xstrdup (const char *s)
 {
   char *value;
   value = strdup (s);
-  if (value == 0)
+  if (value == NULL)
     fatal ("Virtual memory exhausted");
   return value;
 }
@@ -100,9 +112,9 @@ xvsprintf (char *fmt, va_list ap)
   char *buffer;
   va_list ap_copy;
 
-  /* A resonable starting value. */
+  /* A reasonable starting value. */
   size = strlen (fmt) + 1;
-  buffer = (char *)xmalloc (size);
+  buffer = xmalloc (size);
 
   while (1)
     {
@@ -140,7 +152,7 @@ xvsprintf (char *fmt, va_list ap)
 	}
 
       /* Resize the buffer and try again. */
-      buffer = (char *)xrealloc (buffer, size);
+      buffer = xrealloc (buffer, size);
     }
 
   return xstrdup("<FAILURE>");
@@ -165,38 +177,46 @@ char *
 strtok_ws (char *s)
 {
   char *nonws;
-  static char *pointer = NULL;
+  static char *last = NULL;
 
-  if (s)
-    pointer = s;
-  
+  if (s != NULL)
+    last = s;
+  else if (last == NULL)
+    {
+      PRINT_ERROR (("strtok_ws() called but not initalized, this is a *BUG*\n"));
+      abort();
+    }
+
   /* skip to first non-whitespace char. */
-  while (*pointer && isspace (*pointer)) pointer++;
+  while (*last && isspace ((unsigned char)*last))
+    last++;
 
   /* If we reached the end of the string here then there is no more
      data. */
-  if (*pointer == 0)
+  if (*last == '\0')
     return NULL;
 
   /* Now skip to the end of the data. */
-  nonws = pointer;
-  while (*pointer && !isspace (*pointer)) pointer++;
-  if (*pointer)
+  nonws = last;
+  while (*last && !isspace ((unsigned char)*last))
+    last++;
+  if (*last)
     {
-      *pointer = 0;
-      pointer++;
+      *last = '\0';
+      last++;
     }
   return nonws;
 }
 
 /* A case insensitive strncmp. */
 int
-str_comp (char *s1, char *s2, int len)
+str_comp (char *s1, char *s2, size_t len)
 {
-  int i;
+  size_t i;
 
-  for (i=0; i<len; i++)
-    if (toupper (s1[i]) != toupper (s2[i])) return 0;
+  for (i = 0; i < len; i++)
+    if (toupper ((unsigned char)s1[i]) != toupper ((unsigned char)s2[i]))
+      return 0;
 
   return 1;
 }
@@ -281,8 +301,7 @@ handler (Display *d, XErrorEvent *e)
 
   /* If there is already an error to report, replace it with this new
      one. */
-  if (rp_error_msg)
-    free (rp_error_msg);
+  free (rp_error_msg);
   rp_error_msg = xstrdup (error_msg);
 
   return 0;
@@ -339,99 +358,102 @@ print_help (void)
   printf ("-i, --interactive     Execute commands in interactive mode\n");
   printf ("-f, --file <file>     Specify an alternative configuration file\n\n");
 
-  printf ("Report bugs to ratpoison-devel@nongnu.org\n\n");
+  printf ("Report bugs to %s\n\n", PACKAGE_BUGREPORT);
 
   exit (EXIT_SUCCESS);
 }
 
+/* Some systems don't define the close-on-exec flag in fcntl.h */
+#ifndef FD_CLOEXEC
+# define FD_CLOEXEC 1
+#endif
+
 void
-set_close_on_exec (FILE *fd)
+set_close_on_exec (int fd)
 {
-  int fnum = fileno (fd);
-  int flags = fcntl (fnum, F_GETFD);
+  int flags = fcntl (fd, F_GETFD);
   if (flags >= 0)
-    fcntl (fnum, F_SETFD, flags | FD_CLOEXEC);
+    fcntl (fd, F_SETFD, flags | FD_CLOEXEC);
 }
 
 void
 read_rc_file (FILE *file)
 {
-  size_t n = 256;
-  char *partial;
   char *line;
-  size_t linesize = n;
+  size_t linesize = 256;
 
-  partial = (char*)xmalloc(n);
-  line = (char*)xmalloc(linesize);
+  line = xmalloc (linesize);
 
-  *line = '\0';
-  while (fgets (partial, n, file) != NULL)
+  while (getline (&line, &linesize, file) != -1)
     {
-      if ((strlen (line) + strlen (partial)) >= linesize)
+      line[strcspn (line, "\n")] = '\0';
+
+      PRINT_DEBUG (("rcfile line: %s\n", line));
+
+      if (*line != '\0' && *line != '#')
         {
-          linesize *= 2;
-          line = (char*) xrealloc (line, linesize);
-        }
+          cmdret *result;
+          result = command (0, line);
 
-      strcat (line, partial);
-
-      if (feof(file) || (*(line + strlen(line) - 1) == '\n'))
-        {
-          /* FIXME: this is a hack, command() should properly parse
-             the command and args (ie strip whitespace, etc)
-
-             We should not care if there is a newline (or vertical
-             tabs or linefeeds for that matter) at the end of the
-             command (or anywhere between tokens). */
-          if (*(line + strlen(line) - 1) == '\n')
-            *(line + strlen(line) - 1) = '\0';
-
-          PRINT_DEBUG (("rcfile line: %s\n", line));
-
-          /* do it */
-          if (*line != '#')
-            {
-              cmdret *result;
-              result = command (0, line);
-
-              /* Gobble the result. */
-              if (result)
-                cmdret_free (result);
-            }
-
-          *line = '\0';
+          /* Gobble the result. */
+          if (result)
+            cmdret_free (result);
         }
     }
 
-
   free (line);
-  free (partial);
 }
 
-static void
-read_startup_files (char *alt_rcfile)
+const char *
+get_homedir (void)
 {
   char *homedir;
+
+  homedir = getenv ("HOME");
+  if (homedir != NULL && homedir[0] == '\0')
+    homedir = NULL;
+
+#if defined (HAVE_PWD_H) && defined (HAVE_GETPWUID)
+  if (homedir == NULL)
+    {
+      struct passwd *pw;
+
+      pw = getpwuid (getuid ());
+      if (pw != NULL)
+        homedir = pw->pw_dir;
+
+      if (homedir != NULL && homedir[0] == '\0')
+        homedir = NULL;
+    }
+#endif
+
+  return homedir;
+}
+
+static int
+read_startup_files (const char *alt_rcfile)
+{
   FILE *fileptr = NULL;
 
   if (alt_rcfile)
     {
       if ((fileptr = fopen (alt_rcfile, "r")) == NULL)
         {
-          /* we probably don't need to report this, its not an error */
-          PRINT_DEBUG (("ratpoison: could not open %s\n", alt_rcfile));
+          PRINT_ERROR (("ratpoison: could not open %s (%s)\n", alt_rcfile,
+                        strerror (errno)));
+          return -1;
         }
     }
   else
     {
       /* first check $HOME/.ratpoisonrc and if that does not exist then try
-         /etc/ratpoisonrc */
+         $sysconfdir/ratpoisonrc */
+      const char *homedir;
 
-      homedir = getenv ("HOME");
+      homedir = get_homedir ();
+
       if (!homedir)
-        {
-          PRINT_ERROR (("ratpoison: $HOME not set!?\n"));
-        }
+        PRINT_ERROR (("ratpoison: no home directory!?\n"));
       else
         {
           char *filename;
@@ -439,14 +461,17 @@ read_startup_files (char *alt_rcfile)
 
           if ((fileptr = fopen (filename, "r")) == NULL)
             {
-              /* we probably don't need to report this, its not an error */
-              PRINT_DEBUG (("ratpoison: could not open %s\n", filename));
+              if (errno != ENOENT)
+                PRINT_ERROR (("ratpoison: could not open %s (%s)\n",
+                              filename, strerror (errno)));
 
-              if ((fileptr = fopen ("/etc/ratpoisonrc", "r")) == NULL)
-                {
-                  /* neither is this */
-                  PRINT_DEBUG (("ratpoison: could not open /etc/ratpoisonrc\n"));
-                }
+              free (filename);
+              filename = xsprintf ("%s/ratpoisonrc", SYSCONFDIR);
+
+              if ((fileptr = fopen (filename, "r")) == NULL)
+                if (errno != ENOENT)
+                    PRINT_ERROR (("ratpoison: could not open %s (%s)\n",
+                                  filename, strerror (errno)));
             }
           free (filename);
         }
@@ -454,10 +479,11 @@ read_startup_files (char *alt_rcfile)
 
   if (fileptr)
     {
-      set_close_on_exec(fileptr);
+      set_close_on_exec (fileno (fileptr));
       read_rc_file (fileptr);
       fclose (fileptr);
     }
+  return 0;
 }
 
 /* Odd that we spend so much code on making sure the silly welcome
@@ -551,6 +577,12 @@ init_defaults (void)
   set_extents_of_fontset (defaults.font);
 #endif
 
+#ifdef HAVE_LANGINFO_CODESET
+  defaults.utf8_locale = !strcmp (nl_langinfo (CODESET), "UTF-8");
+#endif
+  PRINT_DEBUG (("UTF-8 locale detected: %s\n",
+	       defaults.utf8_locale ? "yes" : "no"));
+
   defaults.fgcolor_string = xstrdup ("black");
   defaults.bgcolor_string = xstrdup ("white");
   defaults.fwcolor_string = xstrdup ("black");
@@ -589,10 +621,17 @@ main (int argc, char *argv[])
   unsigned char interactive = 0;
   char *alt_rcfile = NULL;
 
-  myargv = argv;
-  setlocale(LC_CTYPE, "");
+  setlocale (LC_CTYPE, "");
+  if (XSupportsLocale ())
+    {
+      if (!XSetLocaleModifiers (""))
+	PRINT_ERROR (("Couldn't set X locale modifiers.\n"));
+    }
+  else
+    PRINT_ERROR (("X doesn't seem to support your locale.\n"));
 
   /* Parse the arguments */
+  myargv = argv;
   while (1)
     {
       int option_index = 0;
@@ -623,7 +662,7 @@ main (int argc, char *argv[])
           cmd_count++;
           break;
         case 'd':
-          display = xstrdup (optarg);
+          display = optarg;
           break;
         case 's':
           screen_arg = 1;
@@ -633,7 +672,7 @@ main (int argc, char *argv[])
           interactive = 1;
           break;
         case 'f':
-          alt_rcfile = xstrdup (optarg);
+          alt_rcfile = optarg;
           break;
 
         default:
@@ -654,8 +693,10 @@ main (int argc, char *argv[])
   if (!(dpy = XOpenDisplay (display)))
     {
       fprintf (stderr, "Can't open display\n");
-      return EXIT_FAILURE;
+      exit (EXIT_FAILURE);
     }
+
+  set_close_on_exec (ConnectionNumber (dpy));
 
   /* Set ratpoison specific Atoms. */
   rp_command = XInternAtom (dpy, "RP_COMMAND", False);
@@ -663,23 +704,27 @@ main (int argc, char *argv[])
   rp_command_result = XInternAtom (dpy, "RP_COMMAND_RESULT", False);
   rp_selection = XInternAtom (dpy, "RP_SELECTION", False);
 
+  /* TEXT atoms */
+  xa_string = XA_STRING;
+  xa_compound_text = XInternAtom(dpy, "COMPOUND_TEXT", False);
+  xa_utf8_string = XInternAtom(dpy, "UTF8_STRING", False);
+
   if (cmd_count > 0)
     {
-      int j;
+      int j, screen, exit_status = EXIT_SUCCESS;
 
-      for (j=0; j<cmd_count; j++)
+      screen = screen_arg ? screen_num : -1;
+
+      for (j = 0; j < cmd_count; j++)
         {
-          if (screen_arg)
-            send_command (interactive, (unsigned char *)cmd[j], screen_num);
-          else
-            send_command (interactive, (unsigned char *)cmd[j], -1);
-
+          if (!send_command (interactive, (unsigned char *)cmd[j], screen))
+	    exit_status = EXIT_FAILURE;
           free (cmd[j]);
         }
 
       free (cmd);
       XCloseDisplay (dpy);
-      return EXIT_SUCCESS;
+      return exit_status;
     }
 
   /* Set our Atoms */
@@ -702,7 +747,6 @@ main (int argc, char *argv[])
   _net_wm_window_type_dock = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DOCK", False);
   _net_wm_name = XInternAtom(dpy, "_NET_WM_NAME", False);
   _net_workarea = XInternAtom(dpy, "_NET_WORKAREA", False);
-  utf8_string = XInternAtom(dpy, "UTF8_STRING", False);
 
   /* Setup signal handlers. */
   XSetErrorHandler(handler);
@@ -716,8 +760,8 @@ main (int argc, char *argv[])
   putenv (xsprintf ("RATPOISON=%s", argv[0]));
 
   /* Setup ratpoison's internal structures */
-  init_globals ();
   init_defaults ();
+  init_xkb ();
   init_groups ();
   init_window_stuff ();
   init_xinerama ();
@@ -744,9 +788,8 @@ main (int argc, char *argv[])
         }
     }
 
-  read_startup_files (alt_rcfile);
-  if (alt_rcfile)
-    free (alt_rcfile);
+  if (read_startup_files (alt_rcfile) == -1)
+    return EXIT_FAILURE;
 
   /* Indicate to the user that ratpoison has booted. */
   if (defaults.startup_message)

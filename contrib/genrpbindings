@@ -1,4 +1,4 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 # genrpbindings -- generate ratpoison bindings for various languages
 #
 # Copyright (C) 2003, 2004 Ryan Yeske, Doug Kearns, Shawn Betts
@@ -36,10 +36,14 @@
 # import ratpoison
 # ratpoison.echo( "hello world" )
 
+use warnings;
+
 $\="\n";
 
-# set this to your rp binary
-$RATPOISON=$ENV{RATPOISON} || "ratpoison";
+# Feel free to hardcode this if you installed ratpoison in
+# a non-standard path, but note that you can also use the RATPOISON
+# environment variable
+$RATPOISON = 'ratpoison';
 
 # open source file
 $ACTIONS_C="../src/actions.c";
@@ -59,12 +63,12 @@ open PYTHON, ">$PYTHON_FILE" or die "Can't create $PYTHON_FILE";
 
 # PERL preamble
 print PERL 'package Ratpoison;';
-print PERL '$RATPOISON="',$RATPOISON,'";';
+print PERL '$RATPOISON=$ENV{RATPOISON} ? $ENV{RATPOISON} : "',$RATPOISON,'";';
 print PERL 'sub command { my $a = "@_"; $a =~ s/(\')/\'\\\\\'\'/g; return `$RATPOISON -c \'$a\'`; }';
 
 # ELISP preamble
-print ELISP '(defvar ratpoison-program "',$RATPOISON,'")';
 print ELISP <<PREAMBLE;
+(defvar ratpoison-program (or (getenv "RATPOISON") "$RATPOISON"))
 
 (defmacro defun-ratpoison (cmd)
   `(progn (defun ,(intern (concat "ratpoison-" (symbol-name cmd))) (&rest args)
@@ -89,17 +93,18 @@ PREAMBLE
 print RUBY  <<PREAMBLE;
 module Ratpoison
 
-  RATPOISON="$RATPOISON"
+  RATPOISON=ENV.fetch('RATPOISON', "$RATPOISON")
 
-  def command (command, *args)
+  def command(command, *args)
     return `#{RATPOISON} -c "#{command} #{args.join(' ')}"`
   end
   module_function :command
 PREAMBLE
 
-# Scheme preamble
+# Common Lisp preamble
 
 print COMMONLISP <<PREAMBLE;
+(require :asdf :asdf-utils)
 (defpackage :ratpoison
   (:use :cl))
 
@@ -108,7 +113,9 @@ print COMMONLISP <<PREAMBLE;
 
 (in-package :ratpoison)
 
-(defvar ratpoison-program "$RATPOISON")
+(defvar ratpoison-program
+  (or (asdf-utils:getenv "RATPOISON")
+      "$RATPOISON"))
 
 (defmacro defun-ratpoison (cmd)
   (let ((sym (intern (concatenate 'string "RP-" (symbol-name cmd)))))
@@ -141,9 +148,9 @@ PREAMBLE
 
 print PYTHON <<PREAMBLE;
 import os
-ratpoison="ratpoison -c "
+ratpoison = os.getenv('RATPOISON') or '$RATPOISON'
 def rp_command( *args ):
-    p = os.popen( ratpoison + '"' + (' '.join(  args  ) ) + '"', 'r' )
+    p = os.popen( ratpoison + ' -c ' + '"' + (' '.join(  args  ) ) + '"', 'r' )
     r = p.readlines();
     p.close();
     return r
@@ -170,8 +177,8 @@ while (<ACTIONS_C>) {
               print PERL "sub $name { return command (\"$name\", \@_); }";
               print ELISP "(defun-ratpoison $name)";
               print COMMONLISP "(defun-ratpoison $name)";
-              print RUBY "  def $name (*args)";
-              print RUBY "    return command (\"$name\", args)";
+              print RUBY "  def $name(*args)";
+              print RUBY "    return command(\"$name\", args)";
               print RUBY "  end";
               print RUBY "  module_function :$name\n";
               print PYTHON "def rp_$name( *args ): return rp_command ( '$name ' +  ' '.join( args ) )";
@@ -189,6 +196,9 @@ print ELISP '(provide \'ratpoison-cmd)';
 
 # RUBY postamble
 print RUBY "end";
+
+# COMMON-LISP postamble
+# nothing
 
 # PYTHON postamble
 # nothing

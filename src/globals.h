@@ -127,6 +127,11 @@ extern Atom wm_delete;
 extern Atom wm_take_focus;
 extern Atom wm_colormaps;
 
+/* TEXT atoms */
+extern Atom xa_string;
+extern Atom xa_compound_text;
+extern Atom xa_utf8_string;
+
 /* netwm atoms. */
 extern Atom _net_wm_pid;
 extern Atom _net_supported;
@@ -136,7 +141,6 @@ extern Atom _net_wm_window_type_dialog;
 extern Atom _net_wm_window_type_dock;
 extern Atom _net_wm_name;
 extern Atom _net_workarea;
-extern Atom utf8_string;
 
 /* mouse properties */
 extern int rat_x;
@@ -209,11 +213,9 @@ void set_selection (char *txt);
 void set_nselection (char *txt, int len);
 char *get_selection (void);
 
-void init_globals (void);
-
 /* Wrapper font functions to support Xft */
 
 void rp_draw_string (rp_screen *s, Drawable d, int style, int x, int y, char *string, int length);
-int rp_text_width (rp_screen *s, XFontSet font, char *string, int count);
+int rp_text_width (rp_screen *s, char *string, int count);
 
 #endif

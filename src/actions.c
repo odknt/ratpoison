@@ -19,7 +19,7 @@
  */
 
 #include <unistd.h>
-#include <ctype.h>		/* for isspace */
+#include <ctype.h>
 #include <sys/wait.h>
 #include <X11/keysym.h>
 #include <string.h>
@@ -27,12 +27,17 @@
 #include <time.h>
 #include <errno.h>
 #include <signal.h>
+#include <limits.h>
 #include <X11/Xproto.h>
 
 #include "ratpoison.h"
 
 #ifdef HAVE_LIBXTST
 #  include <X11/extensions/XTest.h>
+#endif
+
+#ifdef HAVE_SYS_IOCTL_H
+#  include <sys/ioctl.h>
 #endif
 
 
@@ -77,6 +82,8 @@ static cmdret * set_topkmap (struct cmdarg **args);
 static cmdret * set_historysize (struct cmdarg **args);
 static cmdret * set_historycompaction (struct cmdarg **args);
 static cmdret * set_historyexpansion (struct cmdarg **args);
+static cmdret * set_msgwait(struct cmdarg **args);
+static cmdret * set_framemsgwait(struct cmdarg **args);
 static cmdret * set_virtuals (struct cmdarg **args);
 static cmdret * set_screensize (struct cmdarg **args);
 static cmdret * set_gap (struct cmdarg **args);
@@ -150,6 +157,8 @@ init_set_vars(void)
   add_set_var ("historysize", set_historysize, 1, "", arg_NUMBER);
   add_set_var ("historycompaction", set_historycompaction, 1, "", arg_NUMBER);
   add_set_var ("historyexpansion", set_historyexpansion, 1, "", arg_NUMBER);
+  add_set_var ("msgwait", set_msgwait, 1, "", arg_NUMBER);
+  add_set_var ("framemsgwait", set_framemsgwait, 1, "", arg_NUMBER);
   add_set_var ("virtuals", set_virtuals, 1, "", arg_NUMBER);
   add_set_var ("screensize", set_screensize, 2,
                "", arg_NUMBER, "", arg_NUMBER);
@@ -175,7 +184,7 @@ add_command (char *name, cmdret * (*fn)(int, struct cmdarg **), int nargs, int i
   cmd->num_args = nargs;
   cmd->ni_required_args = ni_nrequired;
   cmd->i_required_args = i_nrequired;
-  cmd->args = xmalloc(sizeof(struct argspec) * nargs);
+  cmd->args = nargs ? xmalloc (nargs * sizeof (struct argspec)) : NULL;
 
   /* Fill cmd->args */
   va_start(va, ni_nrequired);
@@ -270,6 +279,9 @@ init_user_commands(void)
                "Name: ", arg_STRING);
   add_command ("gnewbg",        cmd_gnewbg,     1, 1, 1,
                "Name: ", arg_STRING);
+  add_command ("gnumber",       cmd_gnumber,    2, 1, 1,
+               "Number: ", arg_NUMBER,
+               "Number: ", arg_NUMBER);
   add_command ("grename",       cmd_grename,    1, 1, 1,
                "Change group name to: ", arg_REST);
   add_command ("gnext",         cmd_gnext,      0, 0, 0);
@@ -430,6 +442,7 @@ typedef struct
 static alias_t *alias_list;
 static int alias_list_size;
 static int alias_list_last;
+static const char *invalid_negative_arg = "invalid negative argument";
 
 static cmdret* frestore (char *data, rp_screen *s);
 static char* fdump (rp_screen *screen);
@@ -443,7 +456,7 @@ clear_frame_redos (void)
 
   list_for_each_safe_entry (cur, iter, tmp, &rp_frame_redos, node)
     {
-      if (cur->frames) free (cur->frames);
+      free (cur->frames);
       list_del (&(cur->node));
     }
 }
@@ -452,7 +465,7 @@ void
 del_frame_undo (rp_frame_undo *u)
 {
   if (!u) return;
-  if (u->frames) free (u->frames);
+  free (u->frames);
   list_del (&(u->node));
   free (u);
 }
@@ -587,7 +600,7 @@ add_keybinding (KeySym keysym, int state, char *cmd, rp_keymap *map)
     {
       /* double the key table size */
       map->actions_size *= 2;
-      map->actions = (rp_action*) xrealloc (map->actions, sizeof (rp_action) * map->actions_size);
+      map->actions = xrealloc (map->actions, sizeof (rp_action) * map->actions_size);
       PRINT_DEBUG (("realloc()ed key_table %d\n", map->actions_size));
     }
 
@@ -602,10 +615,8 @@ add_keybinding (KeySym keysym, int state, char *cmd, rp_keymap *map)
 static void
 replace_keybinding (rp_action *key_action, char *newcmd)
 {
-  if (strlen (key_action->data) < strlen (newcmd))
-    key_action->data = (char*) realloc (key_action->data, strlen (newcmd) + 1);
-
-  strcpy (key_action->data, newcmd);
+  free (key_action->data);
+  key_action->data = xstrdup (newcmd);
 }
 
 static int
@@ -649,7 +660,7 @@ keymap_new (char *name)
   map = xmalloc (sizeof (rp_keymap));
   map->name = xstrdup (name);
   map->actions_size = 1;
-  map->actions = (rp_action*) xmalloc (sizeof (rp_action) * map->actions_size);
+  map->actions = xmalloc (sizeof (rp_action) * map->actions_size);
   map->actions_last = 0;
 
   return map;
@@ -722,7 +733,7 @@ initialize_default_keybindings (void)
   top = keymap_new (defaults.top_kmap);
   list_add (&top->node, &rp_keymaps);
 
-  /* Initialive the alias list. */
+  /* Initialize the alias list. */
   alias_list_size = 5;
   alias_list_last = 0;
   alias_list = xmalloc (sizeof (alias_t) * alias_list_size);
@@ -823,9 +834,10 @@ initialize_default_keybindings (void)
 cmdret *
 cmdret_new (int success, char *fmt, ...)
 {
-  cmdret *ret = xmalloc (sizeof (cmdret));
+  cmdret *ret;
   va_list ap;
 
+  ret = xmalloc (sizeof (cmdret));
   ret->success = success;
 
   if (fmt)
@@ -843,8 +855,7 @@ cmdret_new (int success, char *fmt, ...)
 void
 cmdret_free (cmdret *ret)
 {
-  if (ret->output)
-    free (ret->output);
+  free (ret->output);
   free (ret);
 }
 
@@ -930,17 +941,13 @@ static int string_to_keysym (char *str)
   return keysym;
 }
 
-/* Parse a key description. 's' is, naturally, the key description. */
 static cmdret *
-parse_keydesc (char *s, struct rp_key *key)
+parse_keydesc (char *keydesc, struct rp_key *key)
 {
-  char *token, *next_token, *keydesc;
+  char *token, *next_token;
 
-  if (s == NULL)
+  if (keydesc == NULL)
     return NULL;
-
-  /* Avoid mangling s. */
-  keydesc = xstrdup (s);
 
   key->state = 0;
   key->sym = 0;
@@ -951,28 +958,29 @@ parse_keydesc (char *s, struct rp_key *key)
       key->sym = string_to_keysym (keydesc);
 
       if (key->sym == NoSymbol)
-        {
-          cmdret *ret = cmdret_new (RET_FAILURE, "parse_keydesc: Unknown key '%s'", keydesc);
-          free (keydesc);
-          return ret;
-        }
+        return cmdret_new (RET_FAILURE, "parse_keydesc: Unknown key '%s'",
+                           keydesc);
     }
   else if (keydesc[strlen (keydesc) - 1] == '-')
     {
       /* A key description can't end in a -. */
-      free (keydesc);
-      return cmdret_new (RET_FAILURE, "parse_keydesc: Can't parse key '%s'", s);
+      return cmdret_new (RET_FAILURE, "parse_keydesc: Can't parse key '%s'",
+                         keydesc);
     }
   else
     {
       /* Its got hyphens, so parse out the modifiers and keysym */
-      token = strtok (keydesc, "-");
+      char *copy;
 
+      copy = xstrdup (keydesc);
+
+      token = strtok (copy, "-");
       if (token == NULL)
         {
           /* It was nothing but hyphens */
-          free (keydesc);
-          return cmdret_new (RET_FAILURE, "parse_keydesc: Can't parse key '%s'", s);
+          free (copy);
+          return cmdret_new (RET_FAILURE,
+                             "parse_keydesc: Can't parse key '%s'", keydesc);
         }
 
       do
@@ -987,8 +995,10 @@ parse_keydesc (char *s, struct rp_key *key)
 
               if (key->sym == NoSymbol)
                 {
-                  cmdret *ret = cmdret_new (RET_FAILURE, "parse_keydesc: Unknown key '%s'", token);
-                  free (keydesc);
+                  cmdret *ret = cmdret_new (RET_FAILURE,
+                                            "parse_keydesc: Unknown key '%s'",
+                                            token);
+                  free (copy);
                   return ret;
                 }
             }
@@ -1023,17 +1033,20 @@ parse_keydesc (char *s, struct rp_key *key)
                 }
               else
                 {
-                  free (keydesc);
-                  return cmdret_new (RET_FAILURE, "parse_keydesc: Unknown modifier '%s'", token);
+                  free (copy);
+                  return cmdret_new (RET_FAILURE,
+                                     "parse_keydesc: Unknown modifier '%s'",
+                                     token);
                 }
             }
 
           token = next_token;
         } while (next_token != NULL);
+
+      free (copy);
     }
 
   /* Successfully parsed the key. */
-  free (keydesc);
   return NULL;
 }
 
@@ -1057,8 +1070,14 @@ cmd_unmanage (int interactive, struct cmdarg **args)
 {
   if (args[0] == NULL && !interactive)
     {
+      cmdret *ret;
       char *s = list_unmanaged_windows();
-      cmdret *ret = cmdret_new (RET_SUCCESS, "%s", s);
+
+      if (s)
+         ret = cmdret_new (RET_SUCCESS, "%s", s);
+      else
+        ret = cmdret_new (RET_SUCCESS, NULL);
+
       free (s);
       return ret;
     }
@@ -1128,9 +1147,9 @@ cmd_definekey (int interactive UNUSED, struct cmdarg **args)
     ungrab_keys_all_wins ();
 
   if ((key_action = find_keybinding (key->sym, key->state, map)))
-    replace_keybinding (key_action, ARG_STRING(2));
+    replace_keybinding (key_action, cmd);
   else
-    add_keybinding (key->sym, key->state, ARG_STRING(2), map);
+    add_keybinding (key->sym, key->state, cmd, map);
 
   /* Update the grabbed keys. */
   if (map == find_keymap (defaults.top_kmap))
@@ -1158,7 +1177,7 @@ cmd_source (int interactive UNUSED, struct cmdarg **args)
     return cmdret_new (RET_FAILURE, "source: %s : %s", ARG_STRING(0), strerror(errno));
   else
     {
-      set_close_on_exec (fileptr);
+      set_close_on_exec (fileno (fileptr));
       read_rc_file (fileptr);
       fclose (fileptr);
     }
@@ -1169,36 +1188,42 @@ cmd_source (int interactive UNUSED, struct cmdarg **args)
 cmdret *
 cmd_meta (int interactive UNUSED, struct cmdarg **args)
 {
-  cmdret *ret = NULL;
-  struct rp_key key;
-  XEvent ev1, ev;
-  ev = rp_current_event;
+  XEvent ev;
+
+  memset (&ev, 0, sizeof (ev));
+  /* Redundant with the line above, but points out that passing some
+     garbage time value trips up some clients */
+  ev.xkey.time = CurrentTime;
 
   if (current_window() == NULL)
     return cmdret_new (RET_FAILURE, NULL);
 
-      ev1.xkey.type = KeyPress;
-      ev1.xkey.display = dpy;
-      ev1.xkey.window = current_window()->w;
+  ev.xkey.type = KeyPress;
+  ev.xkey.display = dpy;
+  ev.xkey.window = current_window()->w;
 
   if (args[0])
     {
-      if((ret = parse_keydesc (ARG_STRING(0), &key)))
+      struct rp_key key;
+      cmdret *ret;
+
+      ret = parse_keydesc (ARG_STRING(0), &key);
+      if (ret != NULL)
         return ret;
 
-      ev1.xkey.state = rp_mask_to_x11_mask (key.state);
-      if(!(ev1.xkey.keycode = XKeysymToKeycode (dpy, key.sym)))
-        return cmdret_new (RET_FAILURE, "meta: Couldn't convert keysym to keycode");
+      ev.xkey.state = rp_mask_to_x11_mask (key.state);
+      ev.xkey.keycode = XKeysymToKeycode (dpy, key.sym);
+      if (ev.xkey.keycode == NoSymbol)
+        return cmdret_new (RET_FAILURE,
+                           "meta: Couldn't convert keysym to keycode");
     }
   else
     {
-      ev1.xkey.state = rp_mask_to_x11_mask (prefix_key.state);
-      ev1.xkey.keycode = XKeysymToKeycode (dpy, prefix_key.sym);
+      ev.xkey.state = rp_mask_to_x11_mask (prefix_key.state);
+      ev.xkey.keycode = XKeysymToKeycode (dpy, prefix_key.sym);
     }
-  XSendEvent (dpy, current_window()->w, False, KeyPressMask, &ev1);
 
-  /*   XTestFakeKeyEvent (dpy, XKeysymToKeycode (dpy, 't'), True, 0); */
-
+  XSendEvent (dpy, current_window()->w, False, KeyPressMask, &ev);
   XSync (dpy, False);
 
   return cmdret_new (RET_SUCCESS, NULL);
@@ -1282,20 +1307,22 @@ cmd_other (int interactive UNUSED, struct cmdarg **args UNUSED)
   return cmdret_new (RET_SUCCESS, NULL);
 }
 
+/* Parse a positive or null number, returns -1 on failure. */
 static int
-string_to_window_number (char *str)
+string_to_positive_int (char *str)
 {
-  int i;
-  char *s;
+  char *ep;
+  long lval;
 
-  for (i = 0, s = str; *s; s++)
-    {
-      if (*s < '0' || *s > '9')
-        break;
-      i = i * 10 + (*s - '0');
-    }
+  errno = 0;
+  lval = strtol (str, &ep, 10);
+  if (str[0] == '\0' || *ep != '\0')
+    return -1;
+  if ((errno == ERANGE && (lval == LONG_MAX || lval == LONG_MIN)) ||
+      (lval > INT_MAX || lval < 0))
+    return -1;
 
-  return *s ? -1 : i;
+  return (int)lval;
 }
 
 static struct list_head *
@@ -1381,36 +1408,57 @@ cmd_select (int interactive UNUSED, struct cmdarg **args)
       if (strlen (str) == 1 && str[0] == '-')
         {
           blank_frame (current_frame());
+          ret = cmdret_new (RET_SUCCESS, NULL);
         }
       /* try by number */
-      else if ((n = string_to_window_number (str)) >= 0)
+      else if ((n = string_to_positive_int (str)) >= 0)
         {
           rp_window_elem *elem = group_find_window_by_number (rp_current_group, n);
 
           if (elem)
-            goto_window (elem->win);
+            {
+              goto_window (elem->win);
+              ret = cmdret_new (RET_SUCCESS, NULL);
+            }
           else
-            /* show the window list as feedback */
-            show_bar (current_screen (), defaults.window_fmt);
+            {
+              if (interactive)
+                {
+                  /* show the window list as feedback */
+                  show_bar (current_screen (), defaults.window_fmt);
+                  ret = cmdret_new (RET_SUCCESS, NULL);
+                }
+              else
+                {
+                  ret = cmdret_new (RET_FAILURE,
+                                    "select: unknown window number '%d'", n);
+                }
+            }
         }
       else
         /* try by name */
         {
-          rp_window *win = find_window_name (str);
+          rp_window *win = find_window_name (str, 1);
+
+          if (!win)
+            win = find_window_name (str, 0);
 
           if (win)
-            goto_window (win);
+            {
+              goto_window (win);
+              ret = cmdret_new (RET_SUCCESS, NULL);
+            }
           else
             ret = cmdret_new (RET_FAILURE, "select: unknown window '%s'", str);
         }
     }
+  else
+    /* Silently fail, since the user didn't provide a window spec */
+    ret = cmdret_new (RET_SUCCESS, NULL);
 
   free (str);
 
-  if (ret)
-    return ret;
-  else
-    return cmdret_new (RET_SUCCESS, NULL);
+  return ret;
 }
 
 cmdret *
@@ -1459,9 +1507,13 @@ cmd_kill (int interactive UNUSED, struct cmdarg **args UNUSED)
   if (current_window() == NULL)
     return cmdret_new (RET_FAILURE, NULL);
 
-  XKillClient(dpy, current_window()->w);
-
-  return cmdret_new (RET_FAILURE, NULL);
+  if (XKillClient(dpy, current_window()->w) == BadValue)
+    {
+      return cmdret_new (RET_FAILURE,
+                         "kill failed (got BadValue, this may be a bug)");
+    }
+  else
+    return cmdret_new (RET_SUCCESS, NULL);
 }
 
 cmdret *
@@ -1688,7 +1740,7 @@ exec_completions (char *str)
       return head;
     }
 
-  partial = (char*)xmalloc (n);
+  partial = xmalloc (n);
 
   /* Read data from the file, split it into lines and store it in a
      list. */
@@ -1732,17 +1784,18 @@ read_shellcmd (struct argspec *spec, struct sbuf *s, struct cmdarg **arg, const 
   cmdret *ret;
 
   ret = read_string (spec, s, hist_SHELLCMD, exec_completions, arg);
-  if (command_name && !s && !ret) {
+  if (command_name && !s && !ret && (*arg)->string) {
     /* store for command history */
-    char *str = xmalloc (strlen(command_name) + strlen((*arg)->string) + 2);
-    sprintf (str, "%s %s", command_name, (*arg)->string);
-    history_add (hist_COMMAND, str);
-    free(str);
+    struct sbuf *buf;
+
+    buf = sbuf_new (0);
+    sbuf_printf (buf, "%s %s", command_name, (*arg)->string);
+    history_add (hist_COMMAND, sbuf_get (buf));
+    sbuf_free (buf);
   }
   return ret;
 }
 
-/* Return NULL on abort/failure. */
 static cmdret *
 read_frame (struct sbuf *s,  struct cmdarg **arg)
 {
@@ -1787,7 +1840,7 @@ read_frame (struct sbuf *s,  struct cmdarg **arg)
                  determine the height and width of the window. */
               /*              num = xsprintf (" %d ", cur->number); */
               num = frame_selector (cur->number);
-              width = defaults.bar_x_padding * 2 + rp_text_width (screen, defaults.font, num, -1);
+              width = defaults.bar_x_padding * 2 + rp_text_width (screen, num, -1);
               height = (FONT_HEIGHT (screen) + defaults.bar_y_padding * 2);
 
               /* Create and map the window. */
@@ -1824,16 +1877,21 @@ read_frame (struct sbuf *s,  struct cmdarg **arg)
         {
           fnum = frame_selector_match (keysym_buf[0]);
           if (fnum == -1)
-            goto frame_fail;
+            return cmdret_new (RET_FAILURE, "unknown frame selector `%s'",
+                               keysym_buf);
         }
       else
         {
-          goto frame_fail;
+          return cmdret_new (RET_FAILURE, "frame selector too long `%s'",
+                             keysym_buf);
         }
     }
   else
     {
-      fnum = strtol (sbuf_get (s), NULL, 10);
+      fnum = string_to_positive_int (sbuf_get (s));
+      if (fnum == -1)
+        return cmdret_new (RET_FAILURE, "invalid frame selector `%s',"
+                           " negative or too big", sbuf_get (s));
     }
   /* Now that we have a frame number to go to, let's try to jump to
      it. */
@@ -1849,11 +1907,8 @@ read_frame (struct sbuf *s,  struct cmdarg **arg)
       (*arg)->arg.frame = frame;
       return NULL;
     }
-
-
- frame_fail:
-  *arg = NULL;
-  return cmdret_new (RET_SUCCESS, NULL);
+  else
+    return cmdret_new (RET_FAILURE, "frame not found");
 }
 
 static cmdret *
@@ -1871,7 +1926,7 @@ read_window (struct argspec *spec, struct sbuf *s, struct cmdarg **arg)
   if (name)
     {
       /* try by number */
-      if ((n = string_to_window_number (name)) >= 0)
+      if ((n = string_to_positive_int (name)) >= 0)
         {
           rp_window_elem *elem = group_find_window_by_number (rp_current_group, n);
           if (elem)
@@ -1880,7 +1935,9 @@ read_window (struct argspec *spec, struct sbuf *s, struct cmdarg **arg)
       else
         /* try by name */
         {
-          win = find_window_name (name);
+          win = find_window_name (name, 1);
+          if (win == NULL)
+            win = find_window_name (name, 0);
         }
 
       if (win)
@@ -1961,8 +2018,9 @@ read_gravity (struct argspec *spec, struct sbuf *s,  struct cmdarg **arg)
   return cmdret_new (RET_SUCCESS, NULL);
 }
 
-/* Given a string, find a matching group. First check if the string is
-   a number, then check if it's the name of a group. */
+/* Given a string, find a matching group. First check if the string exactly
+   matches a group name, then check if it is a number & lastly check if it
+   partially matches the name of a group. */
 static rp_group *
 find_group (char *str)
 {
@@ -1970,13 +2028,17 @@ find_group (char *str)
   int n;
 
   /* Check if the user typed a group number. */
-  n = string_to_window_number (str);
+  n = string_to_positive_int (str);
   if (n >= 0)
     {
       group = groups_find_group_by_number (n);
       if (group)
         return group;
     }
+
+  /* Exact matches are special cases. */
+  if ((group = groups_find_group_by_name (str, 1)))
+    return group;
 
   group = groups_find_group_by_name (str, 0);
   return group;
@@ -2150,9 +2212,19 @@ read_number (struct argspec *spec, struct sbuf *s,  struct cmdarg **arg)
 
   if (input)
     {
+      char *ep;
+      long lval;
+
+      errno = 0;
+      lval = strtol (input, &ep, 10);
+      if (input[0] == '\0' || *ep != '\0')
+        return cmdret_new (RET_FAILURE, "malformed number `%s'", input);
+      if ((errno == ERANGE && (lval == LONG_MAX || lval == LONG_MIN)) ||
+          (lval > INT_MAX || lval < INT_MIN))
+        return cmdret_new (RET_FAILURE, "out of range number `%s'", input);
       *arg = xmalloc (sizeof(struct cmdarg));
       (*arg)->type = arg_NUMBER;
-      (*arg)->arg.number = strtol (input, NULL, 10);
+      (*arg)->arg.number = lval;
       (*arg)->string = input;
       return NULL;
     }
@@ -2285,7 +2357,7 @@ parse_args (char *str, struct list_head *list, int nargs, int raw)
   if (str == NULL)
     return NULL;
 
-  tmp = malloc (strlen(str) + 1);
+  tmp = xmalloc (strlen(str) + 1);
 
   for (i=str; *i; i++)
     {
@@ -2294,7 +2366,10 @@ parse_args (char *str, struct list_head *list, int nargs, int raw)
         {
           struct sbuf *s = sbuf_new(0);
           if (!raw)
-            while (*i && isspace (*i)) i++;
+            {
+              while (*i && isspace ((unsigned char)*i))
+                i++;
+            }
           if (*i)
             {
               sbuf_concat(s, i);
@@ -2307,7 +2382,8 @@ parse_args (char *str, struct list_head *list, int nargs, int raw)
       /* Should we eat the whitespace? */
       if (gobble)
         {
-          while (*i && isspace (*i)) i++;
+          while (*i && isspace ((unsigned char)*i))
+            i++;
           gobble = 0;
         }
 
@@ -2347,7 +2423,7 @@ parse_args (char *str, struct list_head *list, int nargs, int raw)
               break;
             }
         }
-      else if (isspace (*i) && !in_str)
+      else if (isspace ((unsigned char)*i) && !in_str)
         {
           /* End the current arg, and start a new one. */
           struct sbuf *s = sbuf_new(0);
@@ -2372,7 +2448,6 @@ parse_args (char *str, struct list_head *list, int nargs, int raw)
       list_add_tail (&s->node, list);
     }
 
-  /* Free our memory and return. */
   free (tmp);
   return ret;
 }
@@ -2384,7 +2459,7 @@ arg_array (struct list_head *head)
   int i = 0;
   struct cmdarg **args, *cur;
 
-  args = (struct cmdarg **)xmalloc (sizeof (struct cmdarg *) * (list_size (head) + 1));
+  args = xmalloc (sizeof (struct cmdarg *) * (list_size (head) + 1));
   list_for_each_entry (cur, head, node)
     {
       args[i] = cur;
@@ -2402,8 +2477,7 @@ arg_free (struct cmdarg *arg)
   if (arg)
     {
       /* read_frame doesn't fill in string. */
-      if (arg->string)
-        free (arg->string);
+      free (arg->string);
       switch (arg->type)
         {
         case arg_KEY:
@@ -2451,22 +2525,18 @@ command (int interactive, char *data)
 
   cmd = input;
   /* skip beginning whitespace. */
-  while (*cmd && isspace (*cmd)) cmd++;
+  while (*cmd && isspace ((unsigned char)*cmd))
+    cmd++;
   rest = cmd;
   /* skip til we get to whitespace */
-  while (*rest && !isspace (*rest)) rest++;
+  while (*rest && !isspace ((unsigned char)*rest))
+    rest++;
   /* mark that spot as the end of the command and make rest point to
      the rest of the string. */
   if (*rest)
     {
       *rest = 0;
       rest++;
-    }
-
-  if (cmd == NULL)
-    {
-       result = cmdret_new (RET_FAILURE, NULL);
-      goto done;
     }
 
   PRINT_DEBUG (("cmd==%s rest==%s\n", cmd, rest?rest:"NULL"));
@@ -2631,17 +2701,32 @@ spawn(char *cmd, int raw, rp_frame *frame)
          in its own session. */
       putenv(current_screen()->display_string);
 #ifdef HAVE_SETSID
-      setsid();
+      if (setsid() == -1)
 #endif
+        {
+#if defined (HAVE_SYS_IOCTL_H) && defined (TIOCNOTTY)
+          int ctty;
+
+          ctty = open ("/dev/tty", O_RDONLY);
+          if (ctty != -1)
+            {
+              ioctl (ctty, TIOCNOTTY);
+              close (ctty);
+            }
+#endif
+
 #if defined (HAVE_SETPGID)
-      setpgid (0, 0);
+          setpgid (0, 0);
 #elif defined (HAVE_SETPGRP)
-      setpgrp (0, 0);
+          /* Assume BSD-style setpgrp */
+          setpgrp (0, 0);
 #endif
+        }
+
       /* raw means don't run it through sh.  */
       if (raw)
-        execl (cmd, cmd, NULL);
-      execl("/bin/sh", "sh", "-c", cmd, NULL);
+        execl (cmd, cmd, (char *)NULL);
+      execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
       _exit(EXIT_FAILURE);
     }
 
@@ -2649,8 +2734,8 @@ spawn(char *cmd, int raw, rp_frame *frame)
   PRINT_DEBUG (("spawned %s\n", cmd));
 
   /* Add this child process to our list. */
-  child = malloc (sizeof (rp_child_info));
-  child->cmd = strdup (cmd);
+  child = xmalloc (sizeof (rp_child_info));
+  child->cmd = xstrdup (cmd);
   child->pid = pid;
   child->terminated = 0;
   child->frame = frame;
@@ -2691,11 +2776,10 @@ cmd_time (int interactive UNUSED, struct cmdarg **args UNUSED)
   time_t timep;
   cmdret *ret;
 
-  timep = time(NULL);
-  tmp = ctime(&timep);
-  msg = xmalloc (strlen (tmp));
-  strncpy(msg, tmp, strlen (tmp) - 1);  /* Remove the newline */
-  msg[strlen(tmp) - 1] = 0;
+  timep = time (NULL);
+  tmp = ctime (&timep);
+  msg = xstrdup (tmp);
+  msg[strcspn (msg, "\n")] = '\0' ;  /* Remove the newline */
 
   ret = cmdret_new (RET_SUCCESS, "%s", msg);
   free (msg);
@@ -2709,13 +2793,6 @@ cmd_number (int interactive UNUSED, struct cmdarg **args)
 {
   int old_number, new_number;
   rp_window_elem *other_win, *win;
-
-  if (args[0] == NULL)
-    {
-      /* XXX: Fix this. */
-      print_window_information (rp_current_group, current_window());
-      return cmdret_new (RET_SUCCESS, NULL);
-    }
 
   /* Gather the args. */
   new_number = ARG(0,number);
@@ -2915,7 +2992,7 @@ cmd_v_split (int interactive UNUSED, struct cmdarg **args)
   if (pixels > 0)
     h_split_frame (frame, pixels);
   else
-    return cmdret_new (RET_FAILURE, "vsplit: invalid argument");
+    return cmdret_new (RET_FAILURE, "vsplit: %s", invalid_negative_arg);
 
   return cmdret_new (RET_SUCCESS, NULL);
 }
@@ -2943,7 +3020,7 @@ cmd_h_split (int interactive UNUSED, struct cmdarg **args)
   if (pixels > 0)
     v_split_frame (frame, pixels);
   else
-    return cmdret_new (RET_FAILURE, "hsplit: invalid argument");
+    return cmdret_new (RET_FAILURE, "hsplit: %s", invalid_negative_arg);
 
   return cmdret_new (RET_SUCCESS, NULL);
 }
@@ -3034,7 +3111,6 @@ cmd_resize (int interactive, struct cmdarg **args)
      non-interactive version. */
   if (interactive && args[0] == NULL)
     {
-      int nbytes;
       char buffer[513];
       unsigned int mod;
       KeySym c;
@@ -3057,7 +3133,7 @@ cmd_resize (int interactive, struct cmdarg **args)
           struct resize_binding *binding;
 
           show_frame_message ("Resize frame");
-          nbytes = read_key (&c, &mod, buffer, sizeof (buffer));
+          read_key (&c, &mod, buffer, sizeof (buffer));
 
           /* Convert the mask to be compatible with ratpoison. */
           mod = x11_mask_to_rp_mask (mod);
@@ -3126,7 +3202,7 @@ set_resizeunit (struct cmdarg **args)
   if (ARG(0,number) >= 0)
     defaults.frame_resize_unit = ARG(0,number);
   else
-    return cmdret_new (RET_FAILURE, "defresizeunit: invalid argument");
+    return cmdret_new (RET_FAILURE, "set resizeunit: %s", invalid_negative_arg);
 
   return cmdret_new (RET_SUCCESS, NULL);
 }
@@ -3211,9 +3287,6 @@ cmd_ratwarp (int interactive UNUSED, struct cmdarg **args)
 cmdret *
 cmd_ratrelwarp (int interactive UNUSED, struct cmdarg **args)
 {
-  rp_screen *s;
-
-  s = current_screen ();
   XWarpPointer (dpy, None, None, 0, 0, 0, 0, ARG(0,number), ARG(1,number));
   return cmdret_new (RET_SUCCESS, NULL);
 }
@@ -3325,7 +3398,7 @@ cmd_license (int interactive UNUSED, struct cmdarg **args UNUSED)
     {
       int tmp;
 
-      tmp = rp_text_width (s, defaults.font, license_text[i], -1);
+      tmp = rp_text_width (s, license_text[i], -1);
       if (tmp > max_width)
         max_width = tmp;
     }
@@ -3380,8 +3453,10 @@ cmd_help (int interactive, struct cmdarg **args)
       int i, old_i;
       int x = 10;
       int y = 0;
-      int max_width = 0;
-      int drawing_keys = 1;             /* 1 if we are drawing keys 0 if we are drawing commands */
+      int header_offset;
+      int width, max_width = 0;
+      /* 1 if we are drawing keys, 0 if we are drawing commands */
+      int drawing_keys = 1;
       char *keysym_name;
 
       /* Switch to the default colormap. */
@@ -3397,34 +3472,40 @@ cmd_help (int interactive, struct cmdarg **args)
 
       y += FONT_HEIGHT (s) * 2;
 
-      rp_draw_string (s, s->help_window, STYLE_NORMAL,
-                      10, y + FONT_ASCENT(s),
-                      "Command key: ", -1);
+      /* Only print the "Command key" for the root keymap */
+      if (map == find_keymap (ROOT_KEYMAP))
+	{
+	  rp_draw_string (s, s->help_window, STYLE_NORMAL,
+			  10, y + FONT_ASCENT(s),
+			  "Command key: ", -1);
 
+	  keysym_name = keysym_to_string (prefix_key.sym, prefix_key.state);
+	  rp_draw_string (s, s->help_window, STYLE_NORMAL,
+			  10 + rp_text_width (s, "Command key: ", -1),
+			  y + FONT_ASCENT(s),
+			  keysym_name, -1);
+	  free (keysym_name);
 
-      keysym_name = keysym_to_string (prefix_key.sym, prefix_key.state);
-      rp_draw_string (s, s->help_window, STYLE_NORMAL,
-                      10 + rp_text_width (s, defaults.font, "Command key: ", -1),
-                      y + FONT_ASCENT(s),
-                      keysym_name, -1);
-      free (keysym_name);
+	  y += FONT_HEIGHT (s) * 2;
+	}
 
-      y += FONT_HEIGHT (s) * 2;
+      header_offset = y;
 
-      i = 0;
-      old_i = 0;
-      while (i<map->actions_last || drawing_keys)
+      i = old_i = 0;
+      while (i < map->actions_last && old_i < map->actions_last)
         {
           if (drawing_keys)
             {
-              keysym_name = keysym_to_string (map->actions[i].key, map->actions[i].state);
+              keysym_name =
+		keysym_to_string (map->actions[i].key, map->actions[i].state);
 
               rp_draw_string (s, s->help_window, STYLE_NORMAL,
                               x, y + FONT_ASCENT(s),
                               keysym_name, -1);
 
-              if (rp_text_width (s, defaults.font, keysym_name, -1) > max_width)
-                max_width = rp_text_width (s, defaults.font, keysym_name, -1);
+              width = rp_text_width (s, keysym_name, -1);
+	      if (width > max_width)
+		max_width = width;
 
               free (keysym_name);
             }
@@ -3434,10 +3515,9 @@ cmd_help (int interactive, struct cmdarg **args)
                               x, y + FONT_ASCENT(s),
                               map->actions[i].data, -1);
 
-              if (rp_text_width (s, defaults.font, map->actions[i].data, -1) > max_width)
-                {
-                  max_width = rp_text_width (s, defaults.font, map->actions[i].data, -1);
-                }
+              width = rp_text_width (s, map->actions[i].data, -1);
+	      if (width > max_width)
+		max_width = width;
             }
 
           y += FONT_HEIGHT (s);
@@ -3459,16 +3539,16 @@ cmd_help (int interactive, struct cmdarg **args)
                 }
 
               max_width = 0;
-              y = FONT_HEIGHT (s) * 4;
+              y = header_offset;
             }
           else
             {
               i++;
-              if (i >= map->actions_last && drawing_keys)
+              if (i == map->actions_last && drawing_keys)
                 {
                   x += max_width + 10;
                   drawing_keys = 0;
-                  y = FONT_HEIGHT (s) * 4;
+                  y = header_offset;
                   i = old_i;
                   max_width = 0;
                 }
@@ -3578,9 +3658,9 @@ cmd_gravity (int interactive UNUSED, struct cmdarg **args)
   int gravity;
   rp_window *win;
 
-  if (current_window() == NULL)
-    return cmdret_new (RET_FAILURE, NULL);
   win = current_window();
+  if (!win)
+    return cmdret_new (RET_FAILURE, NULL);
 
   if (args[0] == NULL)
     return cmdret_new (RET_SUCCESS, "%s", wingravity_to_string (win->gravity));
@@ -3629,16 +3709,37 @@ set_maxsizegravity (struct cmdarg **args)
   return cmdret_new (RET_SUCCESS, NULL);
 }
 
-cmdret *
-cmd_msgwait (int interactive UNUSED, struct cmdarg **args)
+static cmdret *
+set_msgwait (struct cmdarg **args)
 {
   if (args[0] == NULL)
     return cmdret_new (RET_SUCCESS, "%d", defaults.bar_timeout);
 
   if (ARG(0,number) < 0)
-    return cmdret_new (RET_FAILURE, "msgwait: invalid argument");
+    return cmdret_new (RET_FAILURE, "msgwait: %s", invalid_negative_arg);
   else
     defaults.bar_timeout = ARG(0,number);
+
+  return cmdret_new (RET_SUCCESS, NULL);
+}
+
+/* compat */
+cmdret *
+cmd_msgwait (int interactive UNUSED, struct cmdarg **args)
+{
+  return set_msgwait (args);
+}
+
+static cmdret *
+set_framemsgwait (struct cmdarg **args)
+{
+  if (args[0] == NULL)
+    return cmdret_new (RET_SUCCESS, "%d", defaults.frame_indicator_timeout);
+
+  if (ARG(0,number) < 0)
+    return cmdret_new (RET_FAILURE, "framemsgwait: %s", invalid_negative_arg);
+  else
+    defaults.frame_indicator_timeout = ARG(0,number);
 
   return cmdret_new (RET_SUCCESS, NULL);
 }
@@ -3697,6 +3798,10 @@ set_historysize (struct cmdarg **args)
   if (args[0] == NULL)
     return cmdret_new (RET_SUCCESS, "%d", defaults.history_size);
 
+  if (ARG(0, number) < 0)
+    return cmdret_new (RET_FAILURE, "set historysize: %s",
+                       invalid_negative_arg);
+
   defaults.history_size = ARG(0, number);
   return cmdret_new (RET_SUCCESS, NULL);
 }
@@ -3706,6 +3811,9 @@ set_historycompaction (struct cmdarg **args)
 {
   if (args[0] == NULL)
     return cmdret_new (RET_SUCCESS, "%d", defaults.history_compaction);
+
+  if (ARG(0, number) != 0 && ARG(0, number) != 1)
+    return cmdret_new (RET_FAILURE, "set historycompaction: invalid argument");
 
   defaults.history_compaction = ARG(0, number);
   return cmdret_new (RET_SUCCESS, NULL);
@@ -3721,6 +3829,10 @@ set_historyexpansion (struct cmdarg **args)
     return cmdret_new (RET_FAILURE, "Not compiled with libhistory");
   }
 #endif
+
+  if (ARG(0, number) != 0 && ARG(0, number) != 1)
+    return cmdret_new (RET_SUCCESS, "set historyexpansion: invalid argument");
+
   defaults.history_expansion = ARG(0, number);
   return cmdret_new (RET_SUCCESS, NULL);
 }
@@ -3738,7 +3850,7 @@ set_font (struct cmdarg **args)
   font = XftFontOpenName (dpy, s->screen_num, ARG_STRING (0));
 
   if (font == NULL)
-    return cmdret_new (RET_FAILURE, "deffont: unknown font");
+    return cmdret_new (RET_FAILURE, "set font: unknown font");
 
   XftFontClose (dpy, s->xft_font);
   s->xft_font = font;
@@ -3750,7 +3862,7 @@ set_font (struct cmdarg **args)
 
   font = load_query_font_set (dpy, ARG_STRING(0));
   if (font == NULL)
-    return cmdret_new (RET_FAILURE, "deffont: unknown font");
+    return cmdret_new (RET_FAILURE, "set font: unknown font");
 
   /* Save the font as the default. */
   XFreeFontSet (dpy, defaults.font);
@@ -3783,6 +3895,9 @@ set_padding (struct cmdarg **args)
   t = ARG(1,number);
   r = ARG(2,number);
   b = ARG(3,number);
+
+  if (l < 0 || t < 0 || r < 0 || b < 0)
+    return cmdret_new (RET_FAILURE, "set padding: %s", invalid_negative_arg);
 
   /* Resize the frames to make sure they are not too big and not too
      small. */
@@ -3869,7 +3984,7 @@ set_border (struct cmdarg **args)
     return cmdret_new (RET_SUCCESS, "%d", defaults.window_border_width);
 
   if (ARG(0,number) < 0)
-    return cmdret_new (RET_FAILURE, "defborder: invalid argument");
+    return cmdret_new (RET_FAILURE, "set border: %s", invalid_negative_arg);
 
   defaults.window_border_width = ARG(0,number);
 
@@ -3892,7 +4007,7 @@ set_barborder (struct cmdarg **args)
     return cmdret_new (RET_SUCCESS, "%d", defaults.bar_border_width);
 
   if (ARG(0,number) < 0)
-    return cmdret_new (RET_FAILURE, "defbarborder: invalid argument");
+    return cmdret_new (RET_FAILURE, "set barborder: %s", invalid_negative_arg);
 
   defaults.bar_border_width = ARG(0,number);
 
@@ -3916,8 +4031,8 @@ set_barinpadding (struct cmdarg **args)
     return cmdret_new (RET_SUCCESS, "%d", defaults.bar_in_padding);
 
   new_value = ARG(0,number);
-  if (new_value < 0)
-    return cmdret_new (RET_FAILURE, "defbarborder: invalid argument");
+  if (new_value != 0 && new_value != 1)
+    return cmdret_new (RET_FAILURE, "set barinpadding: invalid argument");
 
   defaults.bar_in_padding = new_value;
 
@@ -3947,10 +4062,9 @@ set_inputwidth (struct cmdarg **args)
     return cmdret_new (RET_SUCCESS, "%d", defaults.input_window_size);
 
   if (ARG(0,number) < 0)
-    return cmdret_new (RET_FAILURE, "definputwidth: invalid argument");
-  else
-    defaults.input_window_size = ARG(0,number);
+    return cmdret_new (RET_FAILURE, "set inputwidth: %s", invalid_negative_arg);
 
+  defaults.input_window_size = ARG(0,number);
   return cmdret_new (RET_SUCCESS, NULL);
 }
 
@@ -3959,6 +4073,9 @@ set_waitcursor (struct cmdarg **args)
 {
   if (args[0] == NULL)
     return cmdret_new (RET_SUCCESS, "%d", defaults.wait_for_key_cursor);
+
+  if (ARG(0,number) != 0 && ARG(0,number) != 1)
+    return cmdret_new (RET_FAILURE, "set waitcursor: invalid argument");
 
   defaults.wait_for_key_cursor = ARG(0,number);
   return cmdret_new (RET_SUCCESS, NULL);
@@ -4029,16 +4146,14 @@ set_winname (struct cmdarg **args)
 
   name = ARG_STRING(0);
 
-  /* FIXME: Using strncmp is sorta dirty since `title' and
-     `titlefoobar' would both match. But its quick and dirty. */
-  if (!strncmp (name, "title", 5))
+  if (!strncmp (name, "title", sizeof ("title")))
     defaults.win_name = WIN_NAME_TITLE;
-  else if (!strncmp (name, "name", 4))
+  else if (!strncmp (name, "name", sizeof ("name")))
     defaults.win_name = WIN_NAME_RES_NAME;
-  else if (!strncmp (name, "class", 5))
+  else if (!strncmp (name, "class", sizeof ("class")))
     defaults.win_name = WIN_NAME_RES_CLASS;
   else
-    return cmdret_new (RET_FAILURE, "defwinname: invalid argument");
+    return cmdret_new (RET_FAILURE, "set winname: invalid argument `%s'", name);
 
   return cmdret_new (RET_SUCCESS, NULL);
 }
@@ -4067,7 +4182,7 @@ set_fgcolor (struct cmdarg **args)
   for (i=0; i<num_screens; i++)
     {
       if (!XAllocNamedColor (dpy, screens[i].def_cmap, ARG_STRING(0), &color, &junk))
-        return cmdret_new (RET_FAILURE, "deffgcolor: unknown color");
+        return cmdret_new (RET_FAILURE, "set fgcolor: unknown color");
 
       screens[i].fg_color = color.pixel;
       update_gc (&screens[i]);
@@ -4080,7 +4195,7 @@ set_fgcolor (struct cmdarg **args)
       if (!XftColorAllocName (dpy, DefaultVisual (dpy, screens[i].screen_num),
                               DefaultColormap (dpy, screens[i].screen_num),
                               ARG_STRING(0), &screens[i].xft_fg_color))
-        return cmdret_new (RET_FAILURE, "deffgcolor: unknown color");
+        return cmdret_new (RET_FAILURE, "set fgcolor: unknown color");
 #endif
 
       free (defaults.fgcolor_string);
@@ -4102,7 +4217,7 @@ set_bgcolor (struct cmdarg **args)
   for (i=0; i<num_screens; i++)
     {
       if (!XAllocNamedColor (dpy, screens[i].def_cmap, ARG_STRING(0), &color, &junk))
-        return cmdret_new (RET_FAILURE, "defbgcolor: unknown color");
+        return cmdret_new (RET_FAILURE, "set bgcolor: unknown color");
 
       screens[i].bg_color = color.pixel;
       update_gc (&screens[i]);
@@ -4115,7 +4230,7 @@ set_bgcolor (struct cmdarg **args)
       if (!XftColorAllocName (dpy, DefaultVisual (dpy, screens[i].screen_num),
                               DefaultColormap (dpy, screens[i].screen_num),
                               ARG_STRING(0), &screens[i].xft_bg_color))
-        return cmdret_new (RET_FAILURE, "deffgcolor: unknown color");
+        return cmdret_new (RET_FAILURE, "set fgcolor: unknown color");
 #endif
 
       free (defaults.bgcolor_string);
@@ -4138,7 +4253,7 @@ set_fwcolor (struct cmdarg **args)
   for (i=0; i<num_screens; i++)
     {
       if (!XAllocNamedColor (dpy, screens[i].def_cmap, ARG_STRING(0), &color, &junk))
-        return cmdret_new (RET_FAILURE, "deffwcolor: unknown color");
+        return cmdret_new (RET_FAILURE, "set fwcolor: unknown color");
 
       screens[i].fw_color = color.pixel;
       update_gc (&screens[i]);
@@ -4167,7 +4282,7 @@ set_bwcolor (struct cmdarg **args)
   for (i=0; i<num_screens; i++)
     {
       if (!XAllocNamedColor (dpy, screens[i].def_cmap, ARG_STRING(0), &color, &junk))
-        return cmdret_new (RET_FAILURE, "defbwcolor: unknown color");
+        return cmdret_new (RET_FAILURE, "set bwcolor: unknown color");
 
       screens[i].bw_color = color.pixel;
       update_gc (&screens[i]);
@@ -4221,28 +4336,36 @@ set_gap (struct cmdarg **args)
 cmdret *
 cmd_setenv (int interactive UNUSED, struct cmdarg **args)
 {
+
+  const char *var = ARG_STRING(0), *val = ARG_STRING(1);
+  int ret;
+
+#ifdef HAVE_SETENV
+
+  PRINT_DEBUG(("setenv (\"%s\", \"%s\", 1)\n", var, val));
+  ret = setenv (var, val, 1);
+
+#else /* not HAVE_SETENV */
+
   struct sbuf *env;
 
   /* Setup the environment string. */
-  env = sbuf_new(0);
+  env = sbuf_new (strlen (var) + 1 + strlen (val) + 1);
 
-  sbuf_concat (env, ARG_STRING(0));
+  sbuf_copy (env, var);
   sbuf_concat (env, "=");
-  sbuf_concat (env, ARG_STRING(1));
+  sbuf_concat (env, val);
 
-  /* Stick it in the environment. */
-  PRINT_DEBUG(("%s\n", sbuf_get(env)));
-  putenv (sbuf_get (env));
+  /* Stick it in the environment.  We must *not* free it. */
+  PRINT_DEBUG(("putenv(\"%s\")\n", sbuf_get(env)));
+  ret = putenv (sbuf_free_struct (env));
 
-  /* According to the docs, the actual string is placed in the
-     environment, not the data the string points to. This means
-     modifying the string (or freeing it) directly changes the
-     environment. So, don't free the environment string, just the sbuf
-     data structure. */
-  env->data = NULL;
-  sbuf_free (env);
+#endif /* not HAVE_SETENV */
 
-  return cmdret_new (RET_SUCCESS, NULL);
+  if (ret == -1)
+    return cmdret_new (RET_FAILURE, "cmd_setenv failed: %s", strerror(errno));
+  else
+    return cmdret_new (RET_SUCCESS, NULL);
 }
 
 cmdret *
@@ -4254,7 +4377,7 @@ cmd_getenv (int interactive UNUSED, struct cmdarg **args)
   if (value)
     return cmdret_new (RET_SUCCESS, "%s", value);
   else
-    return cmdret_new (RET_SUCCESS, "");
+    return cmdret_new (RET_FAILURE, NULL);
 }
 
 /* Thanks to Gergely Nagy <algernon@debian.org> for the original
@@ -4262,14 +4385,14 @@ cmd_getenv (int interactive UNUSED, struct cmdarg **args)
 cmdret *
 cmd_chdir (int interactive UNUSED, struct cmdarg **args)
 {
-  char *dir;
+  const char *dir;
 
   if (args[0] == NULL)
     {
-      dir = getenv ("HOME");
-      if (dir == NULL || *dir == '\0')
+      dir = get_homedir ();
+      if (dir == NULL)
         {
-          return cmdret_new (RET_FAILURE, "chdir: HOME not set");
+          return cmdret_new (RET_FAILURE, "chdir: unable to find your HOME directory");
         }
     }
   else
@@ -4286,16 +4409,25 @@ cmd_chdir (int interactive UNUSED, struct cmdarg **args)
 cmdret *
 cmd_unsetenv (int interactive UNUSED, struct cmdarg **args)
 {
-  struct sbuf *s;
+  const char *var = ARG_STRING(0);
+  int ret;
 
-  /* Remove all instances of the env. var. We must add an '=' for it
-     to work on OpenBSD. */
-  s = sbuf_new(0);
-  sbuf_copy (s, ARG_STRING(0));
+  /* Use unsetenv() where possible since putenv("FOO") is not legit everywhere */
+#ifdef HAVE_UNSETENV
+  ret = unsetenv(var);
+#else
+  /* MinGW doesn't have unsetenv() and uses putenv("FOO=") */
+  struct sbuf *s = sbuf_new (strlen (var) + 1 + 1);
+  sbuf_copy (s, var);
   sbuf_concat (s, "=");
-  putenv (sbuf_get(s));
-  sbuf_free (s);
-  return cmdret_new (RET_SUCCESS, NULL);
+  /* let putenv() decide whether to call free() */
+  ret = putenv (sbuf_free_struct (s));
+#endif
+
+  if (ret == -1)
+    return cmdret_new (RET_FAILURE, "cmd_unsetenv failed: %s", strerror (errno));
+  else
+    return cmdret_new (RET_SUCCESS, NULL);
 }
 
 /* Thanks to Gergely Nagy <algernon@debian.org> for the original
@@ -4311,7 +4443,14 @@ cmd_info (int interactive UNUSED, struct cmdarg **args)
       win_elem = group_find_window (&rp_current_group->mapped_windows, win);
       if (!win_elem)
         win_elem = group_find_window (&rp_current_group->unmapped_windows, win);
-
+      if (!win_elem)
+        {
+          rp_group *g = groups_find_group_by_window(win);
+          if (g != NULL)
+            win_elem = group_find_window (&g->mapped_windows, win);
+          if (!win_elem && g != NULL)
+            win_elem = group_find_window (&g->unmapped_windows, win);
+        }
       if (win_elem)
         {
           char *s;
@@ -4467,9 +4606,9 @@ cmd_restart (int interactive UNUSED, struct cmdarg **args UNUSED)
 }
 
 cmdret *
-cmd_startup_message (int interactive, struct cmdarg **args)
+cmd_startup_message (int interactive UNUSED, struct cmdarg **args)
 {
-  if (args[0] == NULL && !interactive)
+  if (args[0] == NULL)
     return cmdret_new (RET_SUCCESS, "%s", defaults.startup_message ? "on":"off");
 
   if (!strcasecmp (ARG_STRING(0), "on"))
@@ -4526,14 +4665,11 @@ set_barpadding (struct cmdarg **args)
   x = ARG(0,number);
   y = ARG(1,number);
 
-  if (x >= 0 && y >= 0)
-    {
-      defaults.bar_x_padding = x;
-      defaults.bar_y_padding = y;
-    }
-  else
-    return cmdret_new (RET_FAILURE, "defbarpadding: invalid arguments");
+  if (x < 0 || y < 0)
+    return cmdret_new (RET_FAILURE, "set barpadding: %s", invalid_negative_arg);
 
+  defaults.bar_x_padding = x;
+  defaults.bar_y_padding = y;
   return cmdret_new (RET_SUCCESS, NULL);
 }
 
@@ -4633,9 +4769,9 @@ cmd_sselect(int interactive UNUSED, struct cmdarg **args)
 }
 
 cmdret *
-cmd_warp (int interactive, struct cmdarg **args)
+cmd_warp (int interactive UNUSED, struct cmdarg **args)
 {
-  if (args[0] == NULL && !interactive)
+  if (args[0] == NULL)
     return cmdret_new (RET_SUCCESS, "%s", defaults.warp ? "on":"off");
 
   if (!strcasecmp (ARG_STRING(0), "on"))
@@ -4847,7 +4983,7 @@ cmd_tmpwm (int interactive UNUSED, struct cmdarg **args)
   XSync (dpy, False);
 
   /* Disable our SIGCHLD handler */
-  set_sig_handler (SIGCHLD, SIG_IGN);
+  set_sig_handler (SIGCHLD, SIG_DFL);
   /* Launch the new WM and wait for it to terminate. */
   pid = spawn (ARG_STRING(0), 0, NULL);
   PRINT_DEBUG (("spawn pid: %d\n", pid));
@@ -4921,52 +5057,52 @@ cmd_fselect (int interactive, struct cmdarg **args)
 static char *
 fdump (rp_screen *screen)
 {
-  struct sbuf *s;
-  char *tmp;
+  struct sbuf *dump;
   rp_frame *cur;
 
-  s = sbuf_new (0);
+  dump = sbuf_new (0);
 
-  /* FIXME: Oooh, gross! there's a trailing comma, yuk! */
   list_for_each_entry (cur, &(screen->frames), node)
     {
-      char *t;
+      char *frameset;
 
-      t = frame_dump (cur, screen);
-      sbuf_concat (s, t);
-      sbuf_concat (s, ",");
-      free (t);
+      frameset = frame_dump (cur, screen);
+      sbuf_concat (dump, frameset);
+      sbuf_concat (dump, ",");
+      free (frameset);
     }
+  sbuf_chop (dump);
 
-  tmp = sbuf_free_struct (s);
-  return tmp;
+  return sbuf_free_struct (dump);
 }
 
 cmdret *
 cmd_fdump (int interactively UNUSED, struct cmdarg **args)
 {
+  rp_screen *screen;
+  cmdret *ret;
+  char *dump;
+
   if (args[0] == NULL)
-    {
-      char *s = fdump (current_screen());
-      cmdret *ret = cmdret_new (RET_SUCCESS, "%s", s);
-      free (s);
-      return ret;
-    }
+    screen = current_screen ();
   else
     {
       int snum;
       snum = ARG(0,number);
 
-      if (snum < 0 || num_screens <= snum)
-        return cmdret_new (RET_FAILURE, "fdump: invalid argument");
+      if (snum < 0)
+        return cmdret_new (RET_FAILURE, "fdump: invalid negative screen number");
+      else if (num_screens <= snum)
+        return cmdret_new (RET_FAILURE, "fdump: unknown screen");
       else
-        {
-          char *s = fdump (&screens[snum]);
-          cmdret *ret = cmdret_new (RET_SUCCESS, "%s", s);
-          free (s);
-          return ret;
-        }
+        screen = &screens[snum];
     }
+
+  dump = fdump (screen);
+  ret = cmdret_new (RET_SUCCESS, "%s", dump);
+  free (dump);
+
+  return ret;
 }
 
 static cmdret *
@@ -4997,7 +5133,7 @@ frestore (char *data, rp_screen *s)
       if (new == NULL)
         {
           free (d);
-          return cmdret_new (RET_SUCCESS, "frestore: invalid frame format");;
+          return cmdret_new (RET_FAILURE, "frestore: invalid frame format");
         }
       list_add_tail (&new->node, &fset);
       token = strtok_r (NULL, ",", &nexttok);
@@ -5088,7 +5224,7 @@ set_winliststyle (struct cmdarg **args)
   else if (!strcmp ("row", ARG_STRING(0)))
     defaults.window_list_style = STYLE_ROW;
   else
-    return cmdret_new (RET_FAILURE, "defwinliststyle: invalid argument");
+    return cmdret_new (RET_FAILURE, "set winliststyle: invalid argument");
 
    return cmdret_new (RET_SUCCESS, NULL);
 }
@@ -5133,11 +5269,61 @@ cmd_gnewbg (int interactive UNUSED, struct cmdarg **args)
 }
 
 cmdret *
+cmd_gnumber (int interactive UNUSED, struct cmdarg **args)
+{
+  int old_number, new_number;
+  rp_group *other_g, *g;
+
+  struct numset *g_numset = group_get_numset();
+
+  /* Gather the args. */
+  new_number = ARG(0,number);
+  if (args[1])
+    g = groups_find_group_by_number (ARG(1,number));
+  else
+    g = rp_current_group;
+
+  /* Make the switch. */
+  if (new_number >= 0 && g)
+    {
+      /* Find other window with same number and give it old number. */
+      other_g = groups_find_group_by_number (new_number);
+      if (other_g != NULL)
+        {
+          old_number = g->number;
+          other_g->number = old_number;
+
+          /* Resort the window in the list */
+          group_resort_group (other_g);
+        }
+      else
+        {
+          numset_release (g_numset, g->number);
+        }
+
+      g->number = new_number;
+      numset_add_num (g_numset, new_number);
+
+      /* resort the the window in the list */
+      group_resort_group (g);
+
+      /* Update the group list. */
+      update_group_names (current_screen());
+    }
+
+  return cmdret_new (RET_SUCCESS, NULL);
+}
+
+cmdret *
 cmd_grename (int interactive UNUSED, struct cmdarg **args)
 {
   if (groups_find_group_by_name (ARG_STRING (0), 1))
     return cmdret_new (RET_FAILURE, "grename: duplicate group name");
   group_rename (rp_current_group, ARG_STRING(0));
+
+  /* Update the group list. */
+  update_group_names (current_screen());
+
   return cmdret_new (RET_SUCCESS, NULL);
 }
 
@@ -5160,65 +5346,31 @@ cmd_gselect (int interactive, struct cmdarg **args)
 cmdret *
 cmd_groups (int interactive, struct cmdarg **args UNUSED)
 {
-  rp_group *cur;
-  int mark_start = 0, mark_end = 0;
-  struct sbuf *buffer;
-  rp_group *last;
+  struct sbuf *group_list = NULL;
+  int dummy;
+  rp_screen *s;
 
-  last = group_last_group ();
-  buffer = sbuf_new (0);
-
-  /* Generate the string. */
-  list_for_each_entry (cur, &rp_groups, node)
-    {
-      char *fmt;
-      char separator;
-
-      if (cur == rp_current_group)
-        mark_start = strlen (sbuf_get (buffer));
-
-      /* Pad start of group name with a space for row
-         style. non-Interactive always gets a column.*/
-      if (defaults.window_list_style == STYLE_ROW && interactive)
-          sbuf_concat (buffer, " ");
-
-      if(cur == rp_current_group)
-        separator = '*';
-      else if(cur == last)
-        separator = '+';
-      else
-        separator = '-';
-
-      fmt = xsprintf ("%d%c%s", cur->number, separator, cur->name);
-      sbuf_concat (buffer, fmt);
-      free (fmt);
-
-      /* Pad end of group name with a space for row style. */
-      if (defaults.window_list_style == STYLE_ROW && interactive)
-        {
-          sbuf_concat (buffer, " ");
-        }
-      else
-        {
-          if (cur->node.next != &rp_groups)
-            sbuf_concat (buffer, "\n");
-        }
-
-      if (cur == rp_current_group)
-        mark_end = strlen (sbuf_get (buffer));
-    }
-
-  /* Display it or return it. */
   if (interactive)
     {
-      marked_message (sbuf_get (buffer), mark_start, mark_end);
-      sbuf_free (buffer);
+      s = current_screen ();
+      /* This is a yukky hack. If the bar already hidden then show the
+         bar. This handles the case when msgwait is 0 (the bar sticks)
+         and the user uses this command to toggle the bar on and
+         off. OR the timeout is >0 then show the bar. Which means,
+         always show the bar if msgwait is >0 which fixes the case
+         when a command in the prefix hook displays the bar. */
+      if (!hide_bar (s) || defaults.bar_timeout > 0) show_group_bar (s);
+
       return cmdret_new (RET_SUCCESS, NULL);
     }
   else
     {
-      cmdret *ret = cmdret_new (RET_SUCCESS, "%s", sbuf_get(buffer));
-      sbuf_free(buffer);
+      cmdret *ret;
+
+      group_list = sbuf_new (0);
+      get_group_list ("\n", group_list, &dummy, &dummy);
+      ret = cmdret_new (RET_SUCCESS, "%s", sbuf_get (group_list));
+      sbuf_free (group_list);
       return ret;
     }
 }
@@ -5512,106 +5664,105 @@ cmd_set (int interactive UNUSED, struct cmdarg **args)
 cmdret *
 cmd_sfdump (int interactively UNUSED, struct cmdarg **args UNUSED)
 {
+  char screen_suffix[16];
   cmdret *ret;
-  struct sbuf *s;
-  char *tmp2;
+  struct sbuf *dump;
   rp_frame *cur;
   int i;
 
-  s = sbuf_new (0);
+  dump = sbuf_new (0);
 
-  for (i=0; i<num_screens; i++)
+  for (i = 0; i < num_screens; i++)
     {
-      tmp2 = xsprintf (" %d,", (rp_have_xinerama)?(screens[i].xine_screen_num):(screens[i].screen_num));
+      snprintf (screen_suffix, sizeof (screen_suffix), " %d,",
+                rp_have_xinerama ?
+                  screens[i].xine_screen_num :
+                  screens[i].screen_num);
 
-      /* FIXME: Oooh, gross! there's a trailing comma, yuk! */
       list_for_each_entry (cur, &(screens[i].frames), node)
         {
-          char *tmp;
+          char *frameset;
 
-	  tmp = frame_dump (cur, &screens[i]);
-          sbuf_concat (s, tmp);
-          sbuf_concat (s, tmp2);
-          free (tmp);
+	  frameset = frame_dump (cur, &screens[i]);
+          sbuf_concat (dump, frameset);
+          sbuf_concat (dump, screen_suffix);
+          free (frameset);
         }
-
-      free (tmp2);
     }
-  ret = cmdret_new (RET_SUCCESS, "%s", sbuf_get (s));
-  sbuf_free (s);
+  sbuf_chop (dump);
+  ret = cmdret_new (RET_SUCCESS, "%s", sbuf_get (dump));
+  sbuf_free (dump);
   return ret;
 }
 
 cmdret *
 cmd_sfrestore (int interactively UNUSED, struct cmdarg **args)
 {
-  int out_of_screen = 0;
-  int number_of_frames = 0;
-  int j;
-  long x;
-  char *d;
-  char *token;
-  char *ptr;
   struct sbuf *buffer[num_screens];
+  char *copy, *ptr, *token;
+  long screen;
+  int out_of_screen = 0;
+  int restored = 0;
+  int i;
 
-  /* initialize frameset-buffer for each screen */
-  for (j=0; j<num_screens; j++) {
-    buffer[j] = sbuf_new(0);
-  }
+  for (i = 0; i < num_screens; i++)
+    buffer[i] = sbuf_new (0);
 
-  /* now split the whole input to the corresponding screens */
-  d = xstrdup (ARG_STRING(0));
+  copy = xstrdup (ARG_STRING (0));
 
-  token = strtok (d, ",");
-  if (token == NULL) {
-    free (d);
-    return cmdret_new (RET_FAILURE, "sfrestore: invalid frame format");
-  }
+  token = strtok (copy, ",");
+  if (token == NULL)
+    {
+      free (copy);
+      return cmdret_new (RET_FAILURE, "sfrestore: invalid frame format");
+    }
 
-  while (token != NULL) {
-    /* search for end of frameset */
-    ptr = token;
-    while (*ptr != ')') {
+  while (token != NULL)
+    {
+      /* search for end of frameset */
+      ptr = token;
+      while (*ptr != ')')
+        ptr++;
       ptr++;
+
+      screen = string_to_positive_int (ptr);
+
+      /* check that specified screen number is valid */
+      if (screen >= 0 && screen < num_screens)
+        {
+          /* clobber screen number here, frestore() doesn't need it */
+          *ptr = '\0';
+          sbuf_concat (buffer[screen], token);
+          sbuf_concat (buffer[screen], ",");
+          restored++;
+        }
+      else
+        out_of_screen++;
+
+      /* continue with next frameset */
+      token = strtok (NULL, ",");
     }
-    /* skip space */
-    ptr++;
 
-    /* convert to integer */
-    x = strtol (ptr, NULL, 10);
-
-    /* check that specified screen number is not bigger than current number of connected screens */
-    if (x < num_screens) {
-      /* append frameset to buffer[x] */
-      sbuf_concat(buffer[x], token);
-      sbuf_concat(buffer[x], ",");
-      number_of_frames++;
-    }
-    else {
-      out_of_screen++;
-    }
-
-    /* continue with next frameset */
-    token = strtok (NULL, ",");
-  } 
-
-  free (d);
+  free (copy);
 
   /* now restore the frames for each screen */
-  for (j=0; j<num_screens; j++) {
-    push_frame_undo (&screens[j]); /* fdump to stack */
-    /* FIXME: store RET_SUCCESS || RET_FAILURE for each screen and output it later */
-    frestore (sbuf_get(buffer[j]), &screens[j]);
-    /* clear buffer */
-    sbuf_free(buffer[j]);
-  }
+  for (i = 0; i < num_screens; i++)
+    {
+      cmdret * ret;
+      push_frame_undo (&screens[i]); /* fdump to stack */
+      /* FIXME: store RET_SUCCESS || RET_FAILURE for each screen and output
+         it later */
+      ret = frestore (sbuf_get (buffer[i]), &screens[i]);
+      cmdret_free (ret);
+      sbuf_free (buffer[i]);
+    }
 
-  if (!out_of_screen) {
-    return cmdret_new (RET_SUCCESS, "Restored %i Frame(s)", number_of_frames);
-  }
-  else {
-    return cmdret_new (RET_SUCCESS, "Restored %i Frame(s), %i Frame(s) out of Screen(s)", number_of_frames, out_of_screen);
-  }
+  if (!out_of_screen)
+    return cmdret_new (RET_SUCCESS, "Restored %i Frame(s)", restored);
+  else
+    return cmdret_new (RET_SUCCESS,
+                       "Restored %i Frame(s), %i Frame(s) out of Screen(s)",
+                       restored, out_of_screen);
 }
 
 cmdret *
@@ -5623,14 +5774,14 @@ cmd_sdump (int interactive UNUSED, struct cmdarg **args UNUSED)
   int i;
 
   s = sbuf_new (0);
-  for (i=0; i<num_screens; ++i)
+  for (i = 0; i < num_screens; ++i)
   {
     tmp = screen_dump (&screens[i]);
     sbuf_concat (s, tmp);
-    if (i + 1 != num_screens)   /* No trailing comma. */
-      sbuf_concat (s, ",");
+    sbuf_concat (s, ",");
     free (tmp);
   }
+  sbuf_chop (s);
 
   ret = cmdret_new (RET_SUCCESS, "%s", sbuf_get (s));
   sbuf_free (s);
@@ -5646,7 +5797,7 @@ set_maxundos (struct cmdarg **args)
     return cmdret_new (RET_SUCCESS, "%d", defaults.maxundos);
 
   if (ARG(0,number) < 0)
-    return cmdret_new (RET_FAILURE, "defmaxundos: invalid argument");
+    return cmdret_new (RET_FAILURE, "set maxundos: %s", invalid_negative_arg);
 
   defaults.maxundos = ARG(0,number);
 
@@ -5855,30 +6006,41 @@ cmdret *
 cmd_prompt (int interactive UNUSED, struct cmdarg **args)
 {
   cmdret *ret;
-  char *query, *output, *prefix;
+  char *output;
 
   if (args[0] == NULL)
-    output = get_input(MESSAGE_PROMPT_COMMAND, hist_PROMPT, trivial_completions);
+    output = get_input (MESSAGE_PROMPT_COMMAND, hist_PROMPT,
+                        trivial_completions);
   else
     {
-      prefix = strchr (ARG_STRING(0), ':');
+      char *arg_str, *prefix;
+
+      arg_str = ARG_STRING(0);
+      prefix = strchr (arg_str, ':');
+
       if (prefix)
         {
+	  struct sbuf *query;
+
           prefix++;             /* Don't return the colon. */
-          query = xmalloc (prefix - ARG_STRING(0) + 1);
-          strncpy (query, ARG_STRING(0), prefix - ARG_STRING(0));
-          query[prefix - ARG_STRING(0)] = 0;    /* null terminate */
-          output = get_more_input (query, prefix, hist_PROMPT, trivial_completions);
-          free (query);
+          query = sbuf_new (prefix - arg_str);
+          sbuf_nconcat (query, arg_str, prefix - arg_str);
+          output = get_more_input (sbuf_get (query), prefix, hist_PROMPT,
+                                   trivial_completions);
+          sbuf_free (query);
         }
       else
         {
-          output = get_input (ARG_STRING(0), hist_PROMPT, trivial_completions);
+          output = get_input (arg_str, hist_PROMPT, trivial_completions);
         }
     }
+
+  if (output == NULL)
+    return cmdret_new (RET_FAILURE, NULL); /* User aborted */
+
   ret = cmdret_new (RET_SUCCESS, "%s", output);
-  if (output)
-    free (output);
+  free (output);
+
   return ret;
 }
 
@@ -5931,12 +6093,20 @@ cmd_dedicate (int interactive UNUSED, struct cmdarg **args)
 {
   rp_frame *f;
 
-  f = current_frame();
-  if (!f) return cmdret_new (RET_SUCCESS, NULL);
+  f = current_frame ();
+  if (f == NULL)
+    return cmdret_new (RET_SUCCESS, NULL);
 
-  if (args[0])
-    /* Whatever you set it to. */
-    f->dedicated = ARG(0,number);
+  if (args[0] != NULL)
+    {
+      int dedicated;
+
+      dedicated = ARG (0, number);
+      if (dedicated != 0 && dedicated != 1)
+        return cmdret_new (RET_FAILURE,
+                           "Invalid \"dedicate\" value, use 0 or 1.");
+      f->dedicated = dedicated;
+    }
   else
     /* Just toggle it, rather than on or off. */
     f->dedicated = !(f->dedicated);
@@ -5955,11 +6125,17 @@ cmd_putsel (int interactive UNUSED, struct cmdarg **args)
 cmdret *
 cmd_getsel (int interactive UNUSED, struct cmdarg **args UNUSED)
 {
-  char *sel = get_selection();
+  char *sel;
   cmdret *ret;
-  ret = cmdret_new (RET_SUCCESS, "%s", sel);
-  free (sel);
-  return ret;
+  sel = get_selection();
+  if (sel != NULL)
+    {
+      ret = cmdret_new (RET_SUCCESS, "%s", sel);
+      free (sel);
+      return ret;
+    }
+  else
+    return cmdret_new (RET_FAILURE, "getsel: no X11 selection");
 }
 
 cmdret *

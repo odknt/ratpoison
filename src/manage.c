@@ -57,25 +57,21 @@ char *
 list_unmanaged_windows (void)
 {
   char *tmp = NULL;
+
   if (unmanaged_window_list)
     {
-      char *tpos;
-      int len = 0;
+      struct sbuf *buf;
       int i;
 
-      for (i = 0; i < num_unmanaged_windows; i++)
-        len += (strlen(unmanaged_window_list[i]) + 1);
-
-      tmp = xmalloc(len + 1);
-      tpos = tmp;
+      buf = sbuf_new (0);
 
       for (i = 0; i < num_unmanaged_windows; i++)
         {
-          sprintf(tpos, "%s\n", unmanaged_window_list[i]);
-          tpos += strlen(unmanaged_window_list[i])+1;
+          sbuf_concat (buf, unmanaged_window_list[i]);
+          sbuf_concat (buf, "\n");
         }
-      tpos--;
-      *tpos = '\0';
+      sbuf_chop (buf);
+      tmp = sbuf_free_struct (buf);
     }
   return tmp;
 }
@@ -200,24 +196,92 @@ get_wmname (Window w)
 {
   char *name = NULL;
   XTextProperty text_prop;
-  int status, n;
+  int ret = None, n;
   char** cl;
 
-  if (XGetWMName(dpy, w, &text_prop) != 0) {
-    status = XmbTextPropertyToTextList(dpy, &text_prop, &cl, &n);
-    if (status == Success && cl && n > 0) {
-      name = xstrdup(cl[0]);
-      XFreeStringList(cl);
-    } else if (text_prop.encoding == XA_STRING) {
-	name = xstrdup((char*)text_prop.value);
+  /* If current encoding is UTF-8, try to use the window's _NET_WM_NAME ewmh
+     property */
+  if (defaults.utf8_locale)
+    {
+      Atom type = None;
+      unsigned long nitems, bytes_after;
+      int format;
+      unsigned char *val = NULL;
+
+      ret = XGetWindowProperty (dpy, w, _net_wm_name, 0, 40, False,
+				xa_utf8_string, &type, &format, &nitems,
+				&bytes_after, &val);
+      /* We have a valid UTF-8 string */
+      if (ret == Success && type == xa_utf8_string
+	  && format == 8 && nitems > 0)
+	{
+	  name = xstrdup ((char *)val);
+	  XFree (val);
+          PRINT_DEBUG (("Fetching window name using _NET_WM_NAME succeeded\n"));
+	  PRINT_DEBUG (("WM_NAME: %s\n", name));
+	  return name;
+	}
+      /* Something went wrong for whatever reason */
+      if (ret == Success && val)
+	XFree (val);
+      PRINT_DEBUG (("Could not fetch window name using _NET_WM_NAME\n"));
     }
-    XFree (text_prop.value);
-  }
+
+  if (XGetWMName (dpy, w, &text_prop) == 0)
+    {
+      PRINT_DEBUG (("XGetWMName failed\n"));
+      return NULL;
+    }
+
+  PRINT_DEBUG (("WM_NAME encoding: "));
+  if (text_prop.encoding == xa_string)
+    PRINT_DEBUG  (("STRING\n"));
+  else if (text_prop.encoding == xa_compound_text)
+    PRINT_DEBUG (("COMPOUND_TEXT\n"));
+  else if (text_prop.encoding == xa_utf8_string)
+    PRINT_DEBUG (("UTF8_STRING\n"));
+  else
+    PRINT_DEBUG (("unknown (%d)\n", (int) text_prop.encoding));
+
+#ifdef X_HAVE_UTF8_STRING
+  /* It seems that most applications supporting UTF8_STRING and
+     _NET_WM_NAME don't bother making their WM_NAME available as
+     UTF8_STRING (but only as either STRING or COMPOUND_TEXT).
+     Let's try anyway.  */
+  if (defaults.utf8_locale && text_prop.encoding == xa_utf8_string)
+    {
+      ret = Xutf8TextPropertyToTextList (dpy, &text_prop, &cl, &n);
+      PRINT_DEBUG (("Xutf8TextPropertyToTextList: %s\n",
+		    ret == Success ? "success" : "error"));
+    }
+  else
+#endif
+    {
+      /* XmbTextPropertyToTextList should be fine for all cases,
+	 even UTF8_STRING encoded WM_NAME */
+      ret = XmbTextPropertyToTextList (dpy, &text_prop, &cl, &n);
+      PRINT_DEBUG (("XmbTextPropertyToTextList: %s\n",
+		    ret == Success ? "success" : "error"));
+    }
+
+  if (ret == Success && cl && n > 0)
+    {
+      name = xstrdup (cl[0]);
+      XFreeStringList (cl);
+    }
+  else if (text_prop.value)
+    {
+      /* Convertion failed, try to get the raw string */
+      name = xstrdup ((char *) text_prop.value);
+      XFree (text_prop.value);
+    }
+
   if (name == NULL) {
     PRINT_DEBUG (("I can't get the WMName.\n"));
   } else {
     PRINT_DEBUG (("WM_NAME: '%s'\n", name));
   }
+
   return name;
 }
 
@@ -456,19 +520,23 @@ unmanaged_window (Window w)
   char *wname;
   int i;
 
-  if (!unmanaged_window_list) return 0;
+  if (!unmanaged_window_list)
+    return 0;
+
+  wname = get_wmname (w);
+  if (!wname)
+    return 0;
 
   for (i = 0; i < num_unmanaged_windows; i++)
     {
-      wname = get_wmname(w);
-      if (!wname) return 0;
-      if (!strcmp(unmanaged_window_list[i], wname))
+      if (!strcmp (unmanaged_window_list[i], wname))
         {
-          free(wname);
+          free (wname);
           return 1;
         }
-      free(wname);
     }
+
+  free (wname);
   return 0;
 }
 

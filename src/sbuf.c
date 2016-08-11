@@ -27,12 +27,12 @@
 struct sbuf *
 sbuf_new (size_t initsz)
 {
-  struct sbuf *b = (struct sbuf*) xmalloc (sizeof (struct sbuf));
+  struct sbuf *b = xmalloc (sizeof (struct sbuf));
 
   if (initsz < 1)
     initsz = 1;
 
-  b->data = (char*) xmalloc (initsz);
+  b->data = xmalloc (initsz);
   b->maxsz = initsz;
 
   b->data[0] = '\0';
@@ -46,9 +46,7 @@ sbuf_free (struct sbuf *b)
 {
   if (b != NULL)
     {
-      if (b->data != NULL)
-        free (b->data);
-
+      free (b->data);
       free (b);
     }
 }
@@ -75,7 +73,7 @@ sbuf_nconcat (struct sbuf *b, const char *str, int len)
 
   if (b->maxsz < minsz)
     {
-      b->data = (char*) xrealloc (b->data, minsz);
+      b->data = xrealloc (b->data, minsz);
       b->maxsz = minsz;
     }
 
@@ -125,6 +123,9 @@ sbuf_printf (struct sbuf *b, char *fmt, ...)
   b->data = xvsprintf (fmt, ap);
   va_end (ap);
 
+  b->len = strlen (b->data);
+  b->maxsz = b->len + 1;
+
   return b->data;
 }
 
@@ -142,4 +143,13 @@ sbuf_printf_concat (struct sbuf *b, char *fmt, ...)
   free (buffer);
 
   return b->data;
+}
+
+void
+sbuf_chop (struct sbuf *b)
+{
+  if (b->len)
+    {
+      b->data[--(b->len)] = '\0';
+    }
 }

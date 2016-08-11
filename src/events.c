@@ -236,10 +236,10 @@ destroy_window (XDestroyWindowEvent *ev)
           if (frame->number == win->scr->current_frame
               && current_screen() == win->scr)
             set_active_frame (frame, 0);
+          /* Since we may have switched windows, call the hook. */
+          if (frame->win_number != EMPTY)
+            hook_run (&rp_switch_win_hook);
         }
-      /* Since we may have switched windows, call the hook. */
-      if (frame->win_number != EMPTY)
-	hook_run (&rp_switch_win_hook);
       withdraw_window (win);
     }
 
@@ -475,7 +475,7 @@ execute_remote_command (Window w)
   unsigned char *req;
 
   status = XGetWindowProperty (dpy, w, rp_command,
-                               0, 0, False, XA_STRING,
+                               0, 0, False, xa_string,
                                &type_ret, &format_ret, &nitems, &bytes_after,
                                &req);
 
@@ -490,7 +490,7 @@ execute_remote_command (Window w)
 
   status = XGetWindowProperty (dpy, w, rp_command,
                                0, (bytes_after / 4) + (bytes_after % 4 ? 1 : 0),
-                               True, XA_STRING, &type_ret, &format_ret, &nitems,
+                               True, xa_string, &type_ret, &format_ret, &nitems,
                                &bytes_after, &req);
 
   if (status != Success || req == NULL)
@@ -567,16 +567,19 @@ receive_command (Window root)
       cmd_ret = execute_remote_command (w);
 
       /* notify the client of any text that was returned by the
-         command. */
+         command.  see communications.c:receive_command_result() */
       if (cmd_ret->output)
         result = xsprintf ("%c%s", cmd_ret->success ? '1':'0', cmd_ret->output);
+      else if (!cmd_ret->success)
+        result = xstrdup("0");
       else
-        result = NULL;
+	result = NULL;
+
       if (result)
-        XChangeProperty (dpy, w, rp_command_result, XA_STRING,
+        XChangeProperty (dpy, w, rp_command_result, xa_string,
                          8, PropModeReplace, (unsigned char *)result, strlen (result));
       else
-        XChangeProperty (dpy, w, rp_command_result, XA_STRING,
+        XChangeProperty (dpy, w, rp_command_result, xa_string,
                          8, PropModeReplace, NULL, 0);
       free (result);
       cmdret_free (cmd_ret);
@@ -733,16 +736,13 @@ selection_request (XSelectionRequestEvent *rq)
   CARD32          target_list[4];
   Atom            target;
   static Atom     xa_targets = None;
-  static Atom     xa_compound_text = None;
-  static Atom     xa_text = None;
+  static Atom     xa_text = None; /* XXX */
   XTextProperty   ct;
   XICCEncodingStyle style;
   char           *cl[4];
 
   if (xa_text == None)
     xa_text = XInternAtom(dpy, "TEXT", False);
-  if (xa_compound_text == None)
-    xa_compound_text = XInternAtom(dpy, "COMPOUND_TEXT", False);
   if (xa_targets == None)
     xa_targets = XInternAtom(dpy, "TARGETS", False);
 
@@ -756,7 +756,7 @@ selection_request (XSelectionRequestEvent *rq)
 
   if (rq->target == xa_targets) {
     target_list[0] = (CARD32) xa_targets;
-    target_list[1] = (CARD32) XA_STRING;
+    target_list[1] = (CARD32) xa_string;
     target_list[2] = (CARD32) xa_text;
     target_list[3] = (CARD32) xa_compound_text;
     XChangeProperty(dpy, rq->requestor, rq->property, rq->target,
@@ -764,12 +764,12 @@ selection_request (XSelectionRequestEvent *rq)
                     (unsigned char *)target_list,
                     (sizeof(target_list) / sizeof(target_list[0])));
     ev.xselection.property = rq->property;
-  } else if (rq->target == XA_STRING
+  } else if (rq->target == xa_string
              || rq->target == xa_compound_text
              || rq->target == xa_text) {
-    if (rq->target == XA_STRING) {
+    if (rq->target == xa_string) {
       style = XStringStyle;
-      target = XA_STRING;
+      target = xa_string;
     } else {
       target = xa_compound_text;
       style = (rq->target == xa_compound_text) ? XCompoundTextStyle
@@ -788,8 +788,7 @@ selection_request (XSelectionRequestEvent *rq)
 static void
 selection_clear (void)
 {
-  if (selection.text)
-    free (selection.text);
+  free (selection.text);
   selection.text = NULL;
   selection.len = 0;
 }
@@ -944,7 +943,7 @@ handle_signals (void)
       {
 	      deactivate_screen(&screens[i]);
       }
-      execlp(rp_exec_newwm, rp_exec_newwm, NULL);
+      execlp (rp_exec_newwm, rp_exec_newwm, (char *)NULL);
 
       /* Failed. Clean up. */
       PRINT_ERROR (("exec %s ", rp_exec_newwm));

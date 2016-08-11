@@ -16,16 +16,13 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program; if not, write to the Free Software
 ## Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
-##
-## $Id: Makefile.am,v 1.12 2006/11/21 17:03:31 brl Exp $
 
-PACKAGE = @PACKAGE@
-VERSION = @VERSION@
+ACLOCAL_AMFLAGS = -I m4 --install
 
 CLEANFILES		= *~ gmon.out
-MAINTAINERCLEANFILES	= Makefile.in aclocal.m4 \
-			config.guess config.h.in config.sub configure \
-			install-sh missing mkinstalldirs stamp-h.in depcomp
+MAINTAINERCLEANFILES	= Makefile.in aclocal.m4 configure src/config.h.in \
+			build-aux/depcomp build-aux/install-sh  \
+			build-aux/missing build-aux/texinfo.tex
 
 SUBDIRS			= src doc contrib
 
@@ -39,4 +36,4 @@ dist-hook:
 sense:
 	@echo 42
 
-.PHONY: bin-dist strip-bin-dist dist-hook sense
+.PHONY: dist-hook sense

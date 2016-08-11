@@ -62,7 +62,6 @@ num_frames (rp_screen *s)
 void
 cleanup_frame (rp_frame *frame)
 {
-  rp_window *last_win;
   rp_window *win;
   rp_screen *screen;
   screen = frames_screen(frame);
@@ -74,7 +73,7 @@ cleanup_frame (rp_frame *frame)
       return;
     }
 
-  last_win = set_frames_window (frame, win);
+  set_frames_window (frame, win);
 
   maximize (win);
   unhide_window (win);
@@ -975,8 +974,8 @@ show_frame_message (char *msg)
       sbuf_concat (msgbuf, EMPTY_FRAME_MESSAGE);
     }
 
-  width = defaults.bar_x_padding * 2 + rp_text_width (s, defaults.font, msgbuf->data,
-							  msgbuf->len);
+  width = defaults.bar_x_padding * 2
+    + rp_text_width (s, msgbuf->data, msgbuf->len);
   height = (FONT_HEIGHT (s) + defaults.bar_y_padding * 2);
 
   /* We don't want another frame indicator to be displayed on another

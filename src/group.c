@@ -60,6 +60,67 @@ free_groups(void)
     }
 }
 
+struct numset *
+group_get_numset(void)
+{
+  return group_numset;
+}
+
+/* get the group list and store it in buffer delimiting each window
+   with delim. mark_start and mark_end will be filled with the text
+   positions for the start and end of the current window. */
+void
+get_group_list (char *delim, struct sbuf *buffer,
+                int *mark_start, int *mark_end)
+{
+  rp_group *cur, *last;
+
+  if (buffer == NULL) return;
+
+  sbuf_clear (buffer);
+
+  last = group_last_group ();
+
+  /* Generate the string. */
+  list_for_each_entry (cur, &rp_groups, node)
+    {
+      char *fmt;
+      char separator;
+
+      if (cur == rp_current_group)
+        *mark_start = strlen (sbuf_get (buffer));
+
+      if(cur == rp_current_group)
+        separator = '*';
+      else if(cur == last)
+        separator = '+';
+      else
+        separator = '-';
+
+      /* A hack, pad the group with a space at the beginning and end
+         if there is no delimiter. */
+      if (!delim)
+        sbuf_concat (buffer, " ");
+
+      fmt = xsprintf ("%d%c%s", cur->number, separator, cur->name);
+      sbuf_concat (buffer, fmt);
+      free (fmt);
+
+      /* A hack, pad the group with a space at the beginning and end
+         if there is no delimiter. */
+      if (!delim)
+        sbuf_concat (buffer, " ");
+
+      /* Only put the delimiter between the group, and not after the the last
+         group. */
+      if (delim && cur->node.next != &rp_groups)
+        sbuf_concat (buffer, delim);
+
+      if (cur == rp_current_group)
+        *mark_end = strlen (sbuf_get (buffer));
+    }
+}
+
 rp_group *
 group_new (int number, char *name)
 {
@@ -83,8 +144,7 @@ group_new (int number, char *name)
 void
 group_free (rp_group *g)
 {
-  if (g->name)
-    free (g->name);
+  free (g->name);
   numset_free (g->numset);
   numset_release (group_numset, g->number);
   free (g);
@@ -94,18 +154,47 @@ rp_group *
 group_add_new_group (char *name)
 {
   rp_group *g;
+  rp_group *cur;
 
   g = group_new (numset_request (group_numset), name);
+
+  list_for_each_entry (cur, &rp_groups, node)
+    {
+      if (cur->number > g->number)
+        {
+          list_add_tail (&g->node, &cur->node);
+          return g;
+        }
+    }
+
   list_add_tail (&g->node, &rp_groups);
 
   return g;
 }
 
 void
+group_resort_group (rp_group *g)
+{
+  rp_group *cur;
+  struct list_head *last = &rp_groups;
+
+  list_del (&g->node);
+  list_for_each_entry (cur, &rp_groups, node)
+    {
+      if (cur->number > g->number)
+        {
+          list_add (&g->node, last);
+          return;
+        }
+      last = &cur->node;
+    }
+  list_add (&g->node, last);
+}
+
+void
 group_rename (rp_group *g, char *name)
 {
-  if (g->name)
-    free (g->name);
+  free (g->name);
   g->name = xstrdup (name);
 }
 
@@ -143,12 +232,19 @@ groups_find_group_by_name (char *s, int exact_match)
 {
   rp_group *cur;
 
-  list_for_each_entry (cur, &rp_groups, node)
+  if (!exact_match)
     {
-      if (cur->name)
+      list_for_each_entry (cur, &rp_groups, node)
         {
-          if ((!exact_match && str_comp (s, cur->name, strlen (s))) ||
-              (exact_match && !strcmp (cur->name, s)))
+          if (cur->name && str_comp (s, cur->name, strlen (s)))
+            return cur;
+        }
+    }
+  else
+    {
+      list_for_each_entry (cur, &rp_groups, node)
+        {
+          if (cur->name && !strcmp (cur->name, s))
             return cur;
         }
     }
@@ -288,7 +384,7 @@ group_add_window (rp_group *g, rp_window *w)
   rp_window_elem *we;
 
   /* Create our container structure for the window. */
-  we = malloc (sizeof (rp_window_elem));
+  we = xmalloc (sizeof (rp_window_elem));
   we->win = w;
   we->number = -1;
 

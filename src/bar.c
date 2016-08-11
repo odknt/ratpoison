@@ -1,5 +1,4 @@
-/* Functionality for a bar across the bottom of the screen listing the
- * windows currently managed.
+/* Functionality for a bar listing the windows currently managed.
  *
  * Copyright (C) 2000, 2001, 2002, 2003, 2004 Shawn Betts <sabetts@vcn.bc.ca>
  *
@@ -36,12 +35,11 @@
 
 #include "ratpoison.h"
 
-#include "assert.h"
-
 /* Possible values for bar_is_raised status. */
 #define BAR_IS_HIDDEN  0
 #define BAR_IS_WINDOW_LIST 1
-#define BAR_IS_MESSAGE     2
+#define BAR_IS_GROUP_LIST  2
+#define BAR_IS_MESSAGE     3
 
 /* A copy of the last message displayed in the message bar. */
 static char *last_msg = NULL;
@@ -117,6 +115,31 @@ show_bar (rp_screen *s, char *fmt)
   return 0;
 }
 
+/* Show group listing in bar. */
+int
+show_group_bar (rp_screen *s)
+{
+  if (!s->bar_is_raised)
+    {
+      s->bar_is_raised = BAR_IS_GROUP_LIST;
+      XMapRaised (dpy, s->bar_window);
+      update_group_names (s);
+
+      /* Switch to the default colormap */
+      if (current_window())
+	XUninstallColormap (dpy, current_window()->colormap);
+      XInstallColormap (dpy, s->def_cmap);
+
+      reset_alarm();
+      return 1;
+    }
+
+  /* If the bar is raised we still need to display the window
+     names. */
+  update_group_names (s);
+  return 0;
+}
+
 int
 bar_x (rp_screen *s, int width)
 {
@@ -185,6 +208,11 @@ update_bar (rp_screen *s)
     return;
   }
 
+  if (s->bar_is_raised == BAR_IS_GROUP_LIST) {
+    update_group_names (s);
+    return;
+  }
+
   if (s->bar_is_raised == BAR_IS_HIDDEN)
     return;
 
@@ -199,24 +227,39 @@ update_window_names (rp_screen *s, char *fmt)
   struct sbuf *bar_buffer;
   int mark_start = 0;
   int mark_end = 0;
+  char *delimiter;
 
   if (s->bar_is_raised != BAR_IS_WINDOW_LIST) return;
 
+  delimiter = (defaults.window_list_style == STYLE_ROW) ? " " : "\n";
+
   bar_buffer = sbuf_new (0);
 
-  if(defaults.window_list_style == STYLE_ROW)
-    {
-      get_window_list (fmt, NULL, bar_buffer, &mark_start, &mark_end);
-      marked_message_internal (sbuf_get (bar_buffer), mark_start, mark_end);
-    }
-  else
-    {
-      get_window_list (fmt, "\n", bar_buffer, &mark_start, &mark_end);
-      marked_message_internal (sbuf_get (bar_buffer), mark_start, mark_end);
-    }
+  get_window_list (fmt, delimiter, bar_buffer, &mark_start, &mark_end);
+  marked_message (sbuf_get (bar_buffer), mark_start, mark_end);
 
+  sbuf_free (bar_buffer);
+}
 
-/*   marked_message (sbuf_get (bar_buffer), mark_start, mark_end); */
+/* Note that we use marked_message_internal to avoid resetting the
+   alarm. */
+void
+update_group_names (rp_screen *s)
+{
+  struct sbuf *bar_buffer;
+  int mark_start = 0;
+  int mark_end = 0;
+  char *delimiter;
+
+  if (s->bar_is_raised != BAR_IS_GROUP_LIST) return;
+
+  delimiter = (defaults.window_list_style == STYLE_ROW) ? " " : "\n";
+
+  bar_buffer = sbuf_new (0);
+
+  get_group_list (delimiter, bar_buffer, &mark_start, &mark_end);
+  marked_message_internal (sbuf_get (bar_buffer), mark_start, mark_end);
+
   sbuf_free (bar_buffer);
 }
 
@@ -274,7 +317,7 @@ max_line_length (char* msg)
           int current_width;
 
           /* Check if this line is the longest so far. */
-          current_width = rp_text_width (s, defaults.font, msg + start, i - start);
+          current_width = rp_text_width (s, msg + start, i - start);
           if(current_width > ret)
             {
               ret = current_width;
@@ -333,70 +376,93 @@ line_beginning (char* msg, int pos)
 }
 
 static void
-draw_partial_string (rp_screen *s, char *msg, int line_no, int start, int end, int style)
+draw_partial_string (rp_screen *s, char *msg, int len,
+                     int x_offset, int y_offset, int style)
 {
-  int line_height = FONT_HEIGHT (s);
-
   rp_draw_string (s, s->bar_window, style,
-                  defaults.bar_x_padding,
+                  defaults.bar_x_padding + x_offset,
                   defaults.bar_y_padding + FONT_ASCENT(s)
-                  + line_no * line_height,
-                  msg + start, end - start + 1);
+                  + y_offset * FONT_HEIGHT (s),
+                  msg, len + 1);
 }
 
+#define REASON_NONE    0x00
+#define REASON_STYLE   0x01
+#define REASON_NEWLINE 0x02
 static void
 draw_string (rp_screen *s, char *msg, int mark_start, int mark_end)
 {
-  XGCValues lgv;
-  GC lgc;
-  unsigned long mask;
-  size_t i;
-  int line_no;
-  int start;
-  int style = STYLE_NORMAL, update = 0;
+  int i, start;
+  int x_offset, y_offset;          /* Base coordinates where to print. */
+  int print_reason = REASON_NONE;  /* Should we print something? */
+  int style = STYLE_NORMAL, next_style = STYLE_NORMAL;
+  int msg_len, part_len;
 
-  lgv.foreground = s->fg_color;
-  mask = GCForeground;
-  lgc = XCreateGC(dpy, s->root, mask, &lgv);
-
-  /* Walk through the string, print each line. */
   start = 0;
-  line_no = 0;
-/*   if (mark_start == 0 && mark_end == 0) */
-/*     mark_start = mark_end = -1; */
+  x_offset = y_offset = 0;
+  msg_len = strlen (msg);
 
-  for(i=0; i < strlen(msg); ++i)
+  /* Walk through the string, print each part. */
+  for (i = 0; i < msg_len; ++i)
     {
-      if (i == (size_t)mark_start)
-        {
-          style = STYLE_INVERSE;
-          update = 1;
-        }
-      if (i == (size_t)mark_end)
-        {
-          style = STYLE_NORMAL;
-          update = 1;
-        }
-      if (msg[i] == '\n')
-        update = 2;
 
-      if (update)
+      /* Should we ignore style hints? */
+      if (mark_start != mark_end)
         {
-          draw_partial_string (s, msg, line_no, start, update == 2 ? i-1:i, style);
-          start = i;
-          if (update == 2)
+          if (i == mark_start)
             {
-              line_no++;
-              start++;
+              next_style = STYLE_INVERSE;
+              if (i > start)
+                print_reason |= REASON_STYLE;
             }
-          update = 0;
+          else if (i == mark_end)
+            {
+              next_style = STYLE_NORMAL;
+              if (i > start)
+                print_reason |= REASON_STYLE;
+            }
         }
+
+      if (msg[i] == '\n')
+          print_reason |= REASON_NEWLINE;
+
+      if (print_reason != REASON_NONE)
+        {
+          /* Strip the trailing newline if necessary. */
+          part_len = i - start - ((print_reason & REASON_NEWLINE) ? 1 : 0);
+
+          draw_partial_string (s, msg + start, part_len,
+                               x_offset, y_offset, style);
+
+          /* Adjust coordinates. */
+          if (print_reason & REASON_NEWLINE)
+            {
+              x_offset = 0;
+              y_offset++;
+              /* Skip newline. */
+              start = i + 1;
+            }
+          else
+            {
+              x_offset += rp_text_width (s, msg + start, part_len);
+              start = i;
+            }
+
+          print_reason = REASON_NONE;
+        }
+      style = next_style;
     }
 
+  part_len = i - start - 1;
+
   /* Print the last line. */
-  draw_partial_string (s, msg, line_no, start, strlen (msg)-1, style);
+  draw_partial_string (s, msg + start, part_len, x_offset, y_offset, style);
+
   XSync (dpy, False);
 }
+#undef REASON_NONE
+#undef REASON_STYLE
+#undef REASON_NEWLINE
 
 /* Move the marks if they are outside the string or if the start is
    after the end. */
@@ -496,12 +562,10 @@ get_mark_box (char *msg, size_t mark_start, size_t mark_end,
   if (mark_start == 0 || start_pos_in_line == 0)
     start = 0;
   else
-    start = rp_text_width (s, defaults.font,
-                           &msg[start_line_beginning],
+    start = rp_text_width (s, &msg[start_line_beginning],
                            start_pos_in_line) + defaults.bar_x_padding;
-   
-  end = rp_text_width (s, defaults.font,
-                       &msg[end_line_beginning],
+
+  end = rp_text_width (s, &msg[end_line_beginning],
                        end_pos_in_line) + defaults.bar_x_padding * 2;
 
   if (mark_end != strlen (msg))
@@ -556,8 +620,7 @@ draw_mark (rp_screen *s, char *msg, int mark_start, int mark_end)
 static void
 update_last_message (char *msg, int mark_start, int mark_end)
 {
-  if (last_msg)
-    free (last_msg);
+  free (last_msg);
   last_msg = xstrdup (msg);
   last_mark_start = mark_start;
   last_mark_end = mark_end;
@@ -634,6 +697,6 @@ show_last_message (void)
 void
 free_bar (void)
 {
-  if (last_msg)
-    free (last_msg);
+  free (last_msg);
+  last_msg = NULL;
 }

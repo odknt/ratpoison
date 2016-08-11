@@ -22,9 +22,7 @@
 #ifndef _RATPOISON_H
 #define _RATPOISON_H 1
 
-#ifdef HAVE_CONFIG_H
-#  include <config.h>
-#endif /* HAVE_CONFIG_H */
+#include "config.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -34,11 +32,6 @@
 #include <X11/Xatom.h>
 #include <X11/Xlocale.h>
 #include <fcntl.h>
-
-/* Some systems don't define the close-on-exec flag in fcntl.h */
-#ifndef FD_CLOEXEC
-# define FD_CLOEXEC 1
-#endif
 
 /* Helper macro for error and debug reporting. */
 #define PRINT_LINE(type) printf (PACKAGE ":%s:%d: %s: ",__FILE__,  __LINE__, #type)
@@ -91,7 +84,8 @@ extern XGCValues gv;
 void clean_up (void);
 rp_screen *find_screen (Window w);
 
-void set_close_on_exec (FILE *fd);
+void set_close_on_exec (int fd);
+const char *get_homedir (void);
 void read_rc_file (FILE *file);
 
 void fatal (const char *msg);
@@ -100,13 +94,11 @@ void *xrealloc (void *ptr, size_t size);
 char *xstrdup (const char *s);
 char *xsprintf (char *fmt, ...);
 char *xvsprintf (char *fmt, va_list ap);
-int str_comp (char *s1, char *s2, int len);
+int str_comp (char *s1, char *s2, size_t len);
 char *strtok_ws (char *s);
-/* Needed in cmd_tmpwm */
 void check_child_procs (void);
 void chld_handler (int signum);
 void set_sig_handler (int sig, void (*action)(int));
-/* Font functions. */
 void set_extents_of_fontset (XFontSet font);
 XFontSet load_query_font_set (Display *disp, const char *fontset_name);
 

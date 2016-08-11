@@ -47,7 +47,7 @@ init_xinerama(void)
                 return;
         }
 
-        if (!XineramaQueryVersion(dpy, &major, &minor) != Success) {
+        if (XineramaQueryVersion(dpy, &major, &minor) == 0) {
                 return;
         }
 
@@ -61,8 +61,13 @@ init_xinerama(void)
         }
 
         xine_screens = XineramaQueryScreens(dpy, &xine_screen_count);
-        if ((xine_screens == NULL) || (xine_screen_count < 2)) {
+        if (xine_screens == NULL) {
                 return;
+        }
+        if (xine_screen_count < 2) {
+               XFree (xine_screens);
+               xine_screens = NULL;
+               return;
         }
 
         rp_have_xinerama = 1;

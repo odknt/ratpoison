@@ -16,15 +16,12 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program; if not, write to the Free Software
 ## Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
-##
-## $Id: Makefile.am,v 1.24 2006/11/21 17:03:31 brl Exp $
 
 bin_PROGRAMS		= ratpoison
 MAINTAINERCLEANFILES = Makefile.in config.h.in
 
-AM_LDFLAGS=${X_LDFLAGS}
+AM_CPPFLAGS=-DSYSCONFDIR='"$(sysconfdir)"' ${X_CFLAGS} ${XFT_CFLAGS}
 ratpoison_LDADD=${XFT_LIBS} ${X_LIBS} ${X_EXTRA_LIBS} ${HISTORY_LIBS}
-AM_CPPFLAGS=${X_CFLAGS} ${XFT_CFLAGS}
 
 ratpoison_SOURCES	= actions.c		\
 			actions.h		\

@@ -213,7 +213,7 @@ init_screens (int screen_arg, int screen_num)
   rp_frame_numset = numset_new();
 
   /* Initialize the screens */
-  screens = (rp_screen *)xmalloc (sizeof (rp_screen) * num_screens);
+  screens = xmalloc (sizeof (rp_screen) * num_screens);
   PRINT_DEBUG (("%d screens.\n", num_screens));
 
   if (screen_arg)
@@ -240,9 +240,9 @@ static void
 init_screen (rp_screen *s, int screen_num)
 {
   XGCValues gcv;
+  struct sbuf *buf;
   int xine_screen_num;
   char *colon;
-  long win_type[1];
 
   win_type[0] = _net_wm_window_type_dock;
 
@@ -280,22 +280,22 @@ init_screen (rp_screen *s, int screen_num)
   s->frames_numset = rp_frame_numset;
 
   /* Build the display string for each screen */
-  s->display_string = xmalloc (strlen(DisplayString (dpy)) + 21);
-  sprintf (s->display_string, "DISPLAY=%s", DisplayString (dpy));
-  colon = strrchr (DisplayString (dpy), ':');
+  buf = sbuf_new (0);
+  sbuf_printf (buf, "DISPLAY=%s", DisplayString (dpy));
+  colon = strrchr (sbuf_get (buf), ':');
   if (colon)
     {
       char *dot;
 
-      dot = strrchr(s->display_string, '.');
-      if (!dot || (strlen(dot) > strlen (colon)) )
+      dot = strrchr (sbuf_get (buf), '.');
+      if (!dot || dot < colon)
         {
-        /* no dot was found or it belongs to fqdn - append screen_num
-           to the end */
-        dot = s->display_string + strlen (s->display_string);
+          /* no dot was found or it belongs to fqdn - append screen_num
+             to the end */
+          sbuf_printf_concat (buf, ".%d", screen_num);
         }
-      sprintf(dot, ".%i", screen_num);
     }
+  s->display_string = sbuf_free_struct (buf);
 
   PRINT_DEBUG (("display string: %s\n", s->display_string));
 
@@ -412,7 +412,7 @@ activate_screen (rp_screen *s)
 
   /* set window manager name */
   XChangeProperty (dpy, RootWindow (dpy, s->screen_num),
-		   _net_wm_name, utf8_string, 8, PropModeReplace,
+		   _net_wm_name, xa_utf8_string, 8, PropModeReplace,
 		   (unsigned char*)"ratpoison", 9);
   XMapWindow (dpy, s->key_window);
 }

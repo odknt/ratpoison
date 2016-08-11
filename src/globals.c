@@ -20,7 +20,7 @@
 
 #include "ratpoison.h"
 
-#include <unistd.h>             /* for usleep(). */
+#include <unistd.h>
 
 int alarm_signalled = 0;
 int kill_signalled = 0;
@@ -47,6 +47,11 @@ Atom rp_command_request;
 Atom rp_command_result;
 Atom rp_selection;
 
+/* TEXT atoms */
+Atom xa_string;
+Atom xa_compound_text;
+Atom xa_utf8_string;
+
 /* netwm atoms */
 Atom _net_wm_pid;
 Atom _net_supported;
@@ -56,7 +61,6 @@ Atom _net_wm_window_type_dialog;
 Atom _net_wm_window_type_dock;
 Atom _net_wm_name;
 Atom _net_workarea;
-Atom utf8_string;
 
 int rp_current_screen;
 rp_screen *screens;
@@ -100,7 +104,7 @@ x_export_selection (void)
   XSetSelectionOwner(dpy, XA_PRIMARY, screens[0].key_window, CurrentTime);
   if (XGetSelectionOwner(dpy, XA_PRIMARY) != screens[0].key_window)
     PRINT_ERROR(("can't get primary selection"));
-  XChangeProperty(dpy, screens[0].root, XA_CUT_BUFFER0, XA_STRING, 8,
+  XChangeProperty(dpy, screens[0].root, XA_CUT_BUFFER0, xa_string, 8,
                   PropModeReplace, (unsigned char*)selection.text, selection.len);
 }
 
@@ -110,11 +114,10 @@ set_nselection (char *txt, int len)
   int i;
 
   /* Update the selection structure */
-  if (selection.text != NULL)
-    free(selection.text);
+  free (selection.text);
 
   /* Copy the string by hand. */
-  selection.text = malloc(len+1);
+  selection.text = xmalloc (len + 1);
   selection.len = len + 1;
   for (i=0; i<len; i++)
     selection.text[i] = txt[i];
@@ -127,8 +130,7 @@ void
 set_selection (char *txt)
 {
   /* Update the selection structure */
-  if (selection.text != NULL)
-    free(selection.text);
+  free (selection.text);
   selection.text = xstrdup (txt);
   selection.len = strlen (txt);
 
@@ -202,7 +204,7 @@ get_selection (void)
       /* be a good icccm citizen */
       XDeleteProperty (dpy, s->input_window, rp_selection);
       /* TODO: we shouldn't use CurrentTime here, use the time of the XKeyEvent, should we fake it? */
-      XConvertSelection (dpy, XA_PRIMARY, XA_STRING, rp_selection, s->input_window, CurrentTime);
+      XConvertSelection (dpy, XA_PRIMARY, xa_string, rp_selection, s->input_window, CurrentTime);
 
       /* This seems like a hack. */
       while (!XCheckTypedWindowEvent (dpy, s->input_window, SelectionNotify, &ev))
@@ -274,17 +276,12 @@ set_window_focus (Window window)
 LIST_HEAD (rp_frame_undos);
 LIST_HEAD (rp_frame_redos);
 
-void
-init_globals (void)
-{
-  selection.text = NULL;
-  selection.len = 0;
-}
 
 /* Wrapper font functions to support Xft */
 
 void
-rp_draw_string (rp_screen *s, Drawable d, int style, int x, int y, char *string, int length)
+rp_draw_string (rp_screen *s, Drawable d, int style, int x, int y,
+		char *string, int length)
 {
   if (length < 0)
     length = strlen (string);
@@ -295,26 +292,38 @@ rp_draw_string (rp_screen *s, Drawable d, int style, int x, int y, char *string,
       XftDraw *draw;
       draw = XftDrawCreate (dpy, d, DefaultVisual (dpy, s->screen_num),
                             DefaultColormap (dpy, s->screen_num));
-      if (draw)
-        {
-          XftDrawStringUtf8 (draw, style == STYLE_NORMAL ? &s->xft_fg_color:&s->xft_bg_color, s->xft_font, x, y, (FcChar8*) string, length);
-          XftDrawDestroy (draw);
-        }
+      if (!draw)
+	{
+	  PRINT_ERROR (("Failed to allocate XftDraw object\n"));
+	  return;
+	}
+
+      if (defaults.utf8_locale)
+	{
+	  XftDrawStringUtf8 (draw, style == STYLE_NORMAL ? &s->xft_fg_color :
+			     &s->xft_bg_color, s->xft_font, x, y,
+			     (FcChar8*) string, length);
+	}
       else
-        PRINT_ERROR(("Failed to allocate XftDraw object\n"));
+	{
+	  XftDrawString8 (draw, style == STYLE_NORMAL ? &s->xft_fg_color :
+			  &s->xft_bg_color, s->xft_font, x, y,
+			  (FcChar8*) string, length);
+     	}
+      XftDrawDestroy (draw);
     }
   else
+    PRINT_ERROR (("No Xft font available.\n"));
+#else
+  XmbDrawString (dpy, d, defaults.font, style == STYLE_NORMAL ? s->normal_gc :
+		 s->inverse_gc, x, y, string, length);
 #endif
-    XmbDrawString (dpy, d, defaults.font, style == STYLE_NORMAL ? s->normal_gc:s->inverse_gc, x, y, string, length);
 }
 
 int
-#ifdef USE_XFT_FONT
-rp_text_width (rp_screen *s, XFontSet font, char *string, int count)
-#else
-rp_text_width (rp_screen *s UNUSED, XFontSet font, char *string, int count)
-#endif
+rp_text_width (rp_screen *s, char *string, int count)
 {
+  (void) s; /* avoid "unused" warning */
   if (count < 0)
     count = strlen (string);
 
@@ -322,11 +331,16 @@ rp_text_width (rp_screen *s UNUSED, XFontSet font, char *string, int count)
   if (s->xft_font)
     {
       XGlyphInfo extents;
-      XftTextExtents8 (dpy, s->xft_font, (FcChar8*) string, count, &extents);
+      if (defaults.utf8_locale)
+        XftTextExtentsUtf8 (dpy, s->xft_font, (FcChar8*) string, count, &extents);
+      else
+        XftTextExtents8 (dpy, s->xft_font, (FcChar8*) string, count, &extents);
       return extents.xOff;
     }
-  else
+  PRINT_ERROR (("No Xft font available.\n"));
+  return 0;
+#else
+  return XmbTextEscapement (defaults.font, string, count);
 #endif
-    return XmbTextEscapement (font, string, count);
 }
 

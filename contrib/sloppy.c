@@ -6,12 +6,12 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2, or (at your option)
  * any later version.
- * 
+ *
  * unrat is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License
  * along with this software; see the file COPYING.  If not, write to
  * the Free Software Foundation, Inc., 59 Temple Place, Suite 330,
@@ -25,73 +25,86 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/wait.h>
+#include <unistd.h>
 
-int (*defaulthandler)();
+int (*defaulthandler) (Display *, XErrorEvent *);
 
 int
-errorhandler(Display *display, XErrorEvent *error)
+errorhandler (Display *display, XErrorEvent *error)
 {
-  if(error->error_code!=BadWindow)
-    (*defaulthandler)(display,error);
+  if (error->error_code != BadWindow)
+    (*defaulthandler) (display, error);
   return 0;
 }
 
 int
-spawn(char *cmd)
+spawn (char *cmd)
 {
   int pid;
 
-  pid = fork();
-  if (pid == 0) 
+  pid = fork ();
+  if (pid == 0)
     {
-      execl("/bin/sh", "sh", "-c", cmd, 0);
-      _exit(EXIT_FAILURE);
+      execl ("/bin/sh", "sh", "-c", cmd, (char *)NULL);
+      _exit (EXIT_FAILURE);
     }
   return pid;
 }
 
 int
-main (int argc, char **argv)
+main (void)
 {
   Display *display;
   int i, numscreens;
 
-  display = XOpenDisplay(NULL);
-  if(!display)
+  display = XOpenDisplay (NULL);
+  if (!display)
     {
-      perror("could not open display");
-      exit(1);
+      fprintf (stderr, "sloppy: could not open display\n");
+      exit (1);
     }
 
-  defaulthandler = XSetErrorHandler(errorhandler);
-  numscreens = ScreenCount(display);
+  /* Ensure child shell will have $RATPOISON set. */
+  if (!getenv ("RATPOISON"))
+    setenv ("RATPOISON", "ratpoison", 0);
 
-  for (i=0; i<numscreens; i++)
+  defaulthandler = XSetErrorHandler (errorhandler);
+  numscreens = ScreenCount (display);
+
+  for (i = 0; i < numscreens; i++)
     {
       unsigned int j, nwins;
       Window dw1, dw2, *wins;
-      
-      XSelectInput(display,RootWindow(display, i), SubstructureNotifyMask);
-      XQueryTree(display, RootWindow(display, i), &dw1, &dw2, &wins, &nwins);
-      for (j=0; j<nwins; j++)
-	XSelectInput(display, wins[j], EnterWindowMask);
+
+      XSelectInput (display, RootWindow (display, i),
+                    SubstructureNotifyMask);
+      XQueryTree (display, RootWindow (display, i),
+                  &dw1, &dw2, &wins, &nwins);
+      for (j = 0; j < nwins; j++)
+	XSelectInput (display, wins[j], EnterWindowMask);
     }
 
-  while (1) 
+  while (1)
     {
       XEvent event;
-      do 
+
+      do
 	{
-	  XNextEvent(display,&event);
+	  XNextEvent (display, &event);
 	  if (event.type == CreateNotify)
-	    XSelectInput(display, event.xcreatewindow.window, EnterWindowMask);
-	} while(event.type != EnterNotify);
+            {
+              XSelectInput (display, event.xcreatewindow.window,
+                            EnterWindowMask);
+            }
+	} while (event.type != EnterNotify);
 
       /* A window was entered. select it. */
       {
         char shell[256];
-        snprintf (shell, 255, "$RATPOISON -c \"select `$RATPOISON -c 'windows %%i %%n' | grep '%ld' | awk '{print $2}'`\"", event.xcrossing.window);
-        //printf ("%s\n", shell);
+
+        snprintf (shell, sizeof(shell),
+                  "$RATPOISON -c \"select $($RATPOISON -c 'windows %%i %%n %%f' | grep '%ld' | awk '$3 != '$($RATPOISON -c curframe)' && $3 != \"\" {print $2}')\" 2>/dev/null",
+                  event.xcrossing.window);
         spawn (shell);
         wait (NULL);
       }

@@ -249,6 +249,7 @@ struct rp_defaults
 
   XFontSet font;
   char *font_string;
+  int utf8_locale;
 
   char *fgcolor_string;
   char *bgcolor_string;
@@ -375,9 +376,9 @@ struct rp_input_line
   char *buffer;
   char *prompt;
   char *saved;
-  int   position;
-  int   length;
-  int   size;
+  size_t position;
+  size_t length;
+  size_t size;
   rp_completions *compl;
   Atom  selection;
   int   history_id;

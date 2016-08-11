@@ -1,6 +1,6 @@
 Shawn Betts (sabetts at vcn bc ca)
 
-Shawn is the original author and current maintainer for
+Shawn is the original author and former maintainer for
 ratpoison. Sickened by the rat and the trend in window managers, he
 sat down one evening and pulled an all-nighter writing the first
 version of ratpoison.
@@ -11,6 +11,10 @@ Ryan doesn't commit much code these days, but that's not because he
 doesn't want to, its just that he forgot his cvs ssh password.
 Meanwhile, the patches are piling up.
 
+Jeremie Courreges-Anglas (jca+ratpoison at wxcvbn dot org)
+
+Current maintainer.
+
 Other Contributors:
 
 Ben Leslie <benno at sesgroup dot net>
@@ -20,7 +24,7 @@ Doug Kearns <djkea2 at mugc dot its dot monash dot edu dot au>
 Gergely Nagy <algernon at debian dot org>
 Henrik Enberg <henrik at enberg dot org>
 Jonathan Walther <krooger at debian dot org>
-Martin Samuelsson <rp-contrib at cos dot user dot lysator dot liu dot se>
+Martin Samuelsson, |cos| on #ratpoison 
 Mike Meyer <mwm at mired dot org>
 Nicklas Lindgren <nili at lysator dot liu dot se>
 Pasi Kallinen <pkalli at cs dot joensuu dot fi>
@@ -28,7 +32,6 @@ Rupert <rupert dot debian at hotpop dot com>
 Tim Goodwin <tjg at star dot le dot ac dot uk>
 Joshua Neuheisel <jneuheisel at msn dot com>
 Thien-Thi Nguyen <ttn at surf dot glug dot org>
-Joshua Neuheisel <jneuheisel at msn dot com>
 Sylvain BEUCLER <beuc at beuc dot net>
 Cameron Patrick <cameron at patrick dot wattle dot id dot au>
 Trent Buck <fubarbaz at bigpond dot com>

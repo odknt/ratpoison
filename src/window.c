@@ -19,12 +19,6 @@
  * Boston, MA 02111-1307 USA
  */
 
-/* Citing getsid(2) here: 
-   To get the prototype under glibc, define both _XOPEN_SOURCE and
-   _XOPEN_SOURCE_EXTENDED, or use "#define _XOPEN_SOURCE n" for some
-   integer n larger than or equal to 500. */
-#define _XOPEN_SOURCE 500
-#include <unistd.h>             /* for getsid */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -124,7 +118,6 @@ get_child_info (Window w)
   unsigned long nitems;
   unsigned long bytes_after;
   unsigned char *req;
-  pid_t sid;
 
   status = XGetWindowProperty (dpy, w, _net_wm_pid,
                                0, 0, False, XA_CARDINAL,
@@ -156,14 +149,9 @@ get_child_info (Window w)
 
   PRINT_DEBUG(("pid: %d\n", pid));
 
-  /* The pids will hopefully be in the same session. */
-  sid = getsid (pid);
   list_for_each_entry (cur, &rp_children, node)
-    {
-      PRINT_DEBUG(("cur->pid=%d sid=%d\n", cur->pid, getsid (cur->pid)));
-      if (sid == getsid (cur->pid))
-        return cur;
-    }
+    if (pid == cur->pid)
+      return cur;
 
   return NULL;
 }
@@ -295,14 +283,25 @@ find_window_number (int n)
 }
 
 rp_window *
-find_window_name (char *name)
+find_window_name (char *name, int exact_match)
 {
   rp_window_elem *cur;
 
-  list_for_each_entry (cur, &rp_current_group->mapped_windows, node)
+  if (!exact_match)
     {
-      if (str_comp (name, window_name (cur->win), strlen (name)))
-        return cur->win;
+      list_for_each_entry (cur, &rp_current_group->mapped_windows, node)
+        {
+          if (str_comp (name, window_name (cur->win), strlen (name)))
+            return cur->win;
+        }
+    }
+  else
+    {
+      list_for_each_entry (cur, &rp_current_group->mapped_windows, node)
+        {
+          if (!strcmp (name, window_name (cur->win)))
+            return cur->win;
+        }
     }
 
   /* didn't find it */
@@ -442,201 +441,6 @@ give_window_focus (rp_window *win, rp_window *last_win)
   XSync (dpy, False);
 }
 
-#if 0
-void
-unhide_transient_for (rp_window *win)
-{
-  rp_frame *frame;
-  rp_window *transient_for;
-
-  if (win == NULL) return;
-  if (!win->transient) return;
-  frame = find_windows_frame (win);
-
-  transient_for = find_window (win->transient_for);
-  if (transient_for == NULL)
-    {
-      PRINT_DEBUG (("Can't find transient_for for '%s'\n", win->name ));
-      return;
-    }
-
-  if (find_windows_frame (transient_for) == NULL)
-    {
-      set_frames_window (frame, transient_for);
-      maximize (transient_for);
-
-      PRINT_DEBUG (("unhide transient window: %s\n", transient_for->name));
-
-      unhide_window_below (transient_for);
-
-      if (transient_for->transient)
-        {
-          unhide_transient_for (transient_for);
-        }
-
-      set_frames_window (frame, win);
-    }
-  else if (transient_for->transient)
-    {
-      unhide_transient_for (transient_for);
-    }
-}
-#endif
-
-#if 0
-/* Hide all transient windows for win until we get to last. */
-void
-hide_transient_for_between (rp_window *win, rp_window *last)
-{
-  rp_window *transient_for;
-
-  if (win == NULL) return;
-  if (!win->transient) return;
-
-  transient_for = find_window (win->transient_for);
-  if (transient_for == last)
-    {
-      PRINT_DEBUG (("Can't find transient_for for '%s'\n", win->name ));
-      return;
-    }
-
-  if (find_windows_frame (transient_for) == NULL)
-    {
-      PRINT_DEBUG (("hide transient window: %s\n", transient_for->name));
-      hide_window (transient_for);
-    }
-
-  if (transient_for->transient)
-    {
-      hide_transient_for (transient_for);
-    }
-}
-#endif
-
-#if 0
-void
-hide_transient_for (rp_window *win)
-{
-  /* Hide ALL the transient windows for win. */
-  hide_transient_for_between (win, NULL);
-}
-#endif
-
-#if 0
-/* return 1 if transient_for is a transient window for win or one of
-   win's transient_for ancestors. */
-int
-is_transient_ancestor (rp_window *win, rp_window *transient_for)
-{
-  rp_window *tmp;
-
-  if (win == NULL) return 0;
-  if (!win->transient) return 0;
-  if (transient_for == NULL) return 0;
-
-  tmp = win;
-
-  do
-    {
-      tmp = find_window (tmp->transient_for);
-      if (tmp == transient_for)
-        return 1;
-    } while (tmp && tmp->transient);
-
-  return 0;
-}
-#endif
-
-/* Gets frame from window -- helper to set_active_window_body
- *
- * While this fct returns a value, it also modifies a param, last_frame,
- * which is ugly... but since this is trying to fix ugly code I guess it
- * can be a little ugly.
- */
-static rp_frame*
-get_frame(rp_window *win, rp_frame *last_frame)
-{
-  rp_frame* frame=NULL;
-
-  /* use the intended frame if we can. */
-  if (win->intended_frame_number >= 0)
-    {
-      /* With Xinerama, we can move a window over to the current screen; otherwise
-       * we have to switch to the screen that the window belongs to.
-       */
-      if (rp_have_xinerama)
-        frame = screen_get_frame (current_screen(), win->intended_frame_number);
-      else
-        frame = screen_get_frame (win->scr, win->intended_frame_number);
-
-      win->intended_frame_number = -1;
-      if (frame != current_frame())
-        last_frame = current_frame();
-    }
-
-  if (!frame)
-    {
-      if (rp_have_xinerama)
-        frame = screen_get_frame (current_screen(), current_screen()->current_frame);
-      else
-        frame = screen_get_frame (win->scr, win->scr->current_frame);
-    }
-
-  return frame;
-}
-
-/* Finds a non-dedicated frame -- helper to set_active_window_body */
-static void
-find_non_dedicated_frame(rp_window *win, rp_frame *frame, rp_frame *last_frame)
-{
-  /* Try to find a non-dedicated frame.  */
-  rp_frame *cur;
-  rp_screen *scr;
-  int done;
-
-  scr = (rp_have_xinerama)?&screens[rp_current_screen]:win->scr;
-  done = 0;
-
-  /* Try the only / current screen... */
-  for (cur = list_next_entry (frame, &scr->frames, node);
-       cur != frame;
-       cur = list_next_entry (cur, &scr->frames, node))
-    {
-      if (!cur->dedicated)
-        {
-          set_active_frame (cur, 0);
-          last_frame = frame;
-          frame = cur;
-          break;
-        }
-    }
-
-  /* If we have Xinerama, we can check *all* screens... */
-  /* TODO: could this be put into yet another function? */
-  if (rp_have_xinerama && !done)
-    {
-      int i;
-
-      for (i=0; i<num_screens && !done; i++)
-        {
-          if (scr == &screens[i]) continue;
-          list_for_each_entry (cur,&screens[i].frames,node)
-            {
-              if (!cur->dedicated)
-                {
-                  set_active_frame (cur, 0);
-                  last_frame = frame;
-                  frame = cur;
-
-                  /* Good case for a goto here? */
-                  done = 1; /* Break outer loop. */
-                  break;    /* Break inner loop. */
-                }
-            }
-        }
-    }
-}
-
 /* In the current frame, set the active window to win. win will have focus. */
 void set_active_window (rp_window *win)
 {
@@ -648,24 +452,88 @@ void set_active_window_force (rp_window *win)
   set_active_window_body(win, 1);
 }
 
+static rp_frame *
+find_frame_non_dedicated(rp_screen *current_screen, rp_frame *current_frame)
+{
+  rp_frame *cur;
+
+  /* Try the only / current screen... */
+  for (cur = list_next_entry (current_frame, &current_screen->frames, node);
+       cur != current_frame;
+       cur = list_next_entry (cur, &current_screen->frames, node))
+    {
+      if (!cur->dedicated)
+        return cur;
+    }
+
+  /* If we have Xinerama, we can check *all* screens... */
+  if (rp_have_xinerama)
+    {
+      int i;
+
+      for (i = 0; i < num_screens; i++)
+        {
+          if (current_screen == &screens[i])
+            continue;
+
+          list_for_each_entry (cur, &screens[i].frames, node)
+            {
+              if (!cur->dedicated)
+                return cur;
+            }
+        }
+    }
+
+  return NULL;
+}
+
 void
 set_active_window_body (rp_window *win, int force)
 {
   rp_window *last_win;
   rp_frame *frame = NULL, *last_frame = NULL;
+  rp_screen *screen;
 
-  if (win == NULL) return;
+  if (win == NULL)
+    return;
 
   PRINT_DEBUG (("intended_frame_number: %d\n", win->intended_frame_number));
 
-  frame = get_frame(win, last_frame);
+  /* With Xinerama, we can move a window over to the current screen; otherwise
+   * we have to switch to the screen that the window belongs to.
+   */
+  screen = rp_have_xinerama ? current_screen () : win->scr;
+
+  /* use the intended frame if we can. */
+  if (win->intended_frame_number >= 0)
+    {
+      frame = screen_get_frame (screen, win->intended_frame_number);
+      win->intended_frame_number = -1;
+      if (frame != current_frame ())
+        last_frame = current_frame ();
+    }
+
+  if (frame == NULL)
+    frame = screen_get_frame (screen, screen->current_frame);
 
   if (frame->dedicated && !force)
-	find_non_dedicated_frame(win, frame, last_frame);
+    {
+      /* Try to find a non-dedicated frame. */
+      rp_frame *non_dedicated;
+
+      non_dedicated = find_frame_non_dedicated (screen, frame);
+      if (non_dedicated != NULL)
+        {
+          last_frame = frame;
+          frame = non_dedicated;
+          set_active_frame (frame, 0);
+        }
+    }
 
   last_win = set_frames_window (frame, win);
 
-  if (last_win) PRINT_DEBUG (("last window: %s\n", window_name (last_win)));
+  if (last_win != NULL)
+    PRINT_DEBUG (("last window: %s\n", window_name (last_win)));
   PRINT_DEBUG (("new window: %s\n", window_name (win)));
 
   /* Make sure the window comes up full screen */
@@ -685,7 +553,7 @@ set_active_window_body (rp_window *win, int force)
   XSync (dpy, False);
 
   /* If we switched frame, go back to the old one. */
-  if (last_frame)
+  if (last_frame != NULL)
     set_active_frame (last_frame, 0);
 
   /* Call the switch window hook */
@@ -714,21 +582,6 @@ goto_window (rp_window *win)
     }
 }
 
-void
-print_window_information (rp_group *group, rp_window *win)
-{
-  rp_window_elem *win_elem;
-  /* Display the window's number in group. This gives the possibility
-     of windows existing in multiple groups. */
-  win_elem = group_find_window (&group->mapped_windows, win);
-  if (win_elem)
-    marked_message_printf (0, 0, MESSAGE_WINDOW_INFORMATION,
-                           win_elem->number, window_name (win));
-  else
-    marked_message_printf (0, 0, "%s doesn't exist in group %d\n",
-                           window_name(win), group->number);
-}
-
 /* get the window list and store it in buffer delimiting each window
    with delim. mark_start and mark_end will be filled with the text
    positions for the start and end of the current window. */
@@ -737,12 +590,11 @@ get_window_list (char *fmt, char *delim, struct sbuf *buffer,
                  int *mark_start, int *mark_end)
 {
   rp_window_elem *we;
-  rp_window *other_window;
 
   if (buffer == NULL) return;
 
   sbuf_clear (buffer);
-  other_window = find_window_other (current_screen());
+  find_window_other (current_screen());
 
   /* We only loop through the current group to look for windows. */
   list_for_each_entry (we,&rp_current_group->mapped_windows,node)
