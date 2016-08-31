@@ -729,6 +729,8 @@ main (int argc, char *argv[])
   _net_wm_window_type_dock = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DOCK", False);
   _net_wm_name = XInternAtom(dpy, "_NET_WM_NAME", False);
   _net_workarea = XInternAtom(dpy, "_NET_WORKAREA", False);
+  _net_client_list = XInternAtom(dpy, "_NET_CLIENT_LIST", False);
+  _net_number_of_desktops = XInternAtom(dpy, "_NET_NUMBER_OF_DESKTOPS", False);
 
   /* Setup signal handlers. */
   XSetErrorHandler(handler);

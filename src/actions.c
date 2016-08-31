@@ -6201,6 +6201,11 @@ cmd_vinit (int interactive, struct cmdarg **args)
     list_add_tail (&v->node, &rp_virtuals);
   }
 
+  /* set num of desktops */
+  XChangeProperty (dpy, RootWindow (dpy, screen->screen_num),
+    _net_number_of_desktops, XA_CARDINAL, 32, PropModeReplace,
+    (unsigned char*)&defaults.virtuals, 1);
+
   /* start in workspace 1 */
   PRINT_DEBUG (("vinit: selecting default\n"));
   input = xstrdup ("default");

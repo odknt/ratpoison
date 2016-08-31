@@ -61,6 +61,8 @@ Atom _net_wm_window_type_dialog;
 Atom _net_wm_window_type_dock;
 Atom _net_wm_name;
 Atom _net_workarea;
+Atom _net_client_list;
+Atom _net_number_of_desktops;
 
 int rp_current_screen;
 rp_screen *screens;

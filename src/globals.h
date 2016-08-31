@@ -141,6 +141,8 @@ extern Atom _net_wm_window_type_dialog;
 extern Atom _net_wm_window_type_dock;
 extern Atom _net_wm_name;
 extern Atom _net_workarea;
+extern Atom _net_client_list;
+extern Atom _net_number_of_desktops;
 
 /* mouse properties */
 extern int rat_x;
