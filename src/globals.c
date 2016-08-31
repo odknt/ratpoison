@@ -53,16 +53,19 @@ Atom xa_compound_text;
 Atom xa_utf8_string;
 
 /* netwm atoms */
-Atom _net_wm_pid;
-Atom _net_supported;
-Atom _net_active_window;
-Atom _net_wm_window_type;
-Atom _net_wm_window_type_dialog;
-Atom _net_wm_window_type_dock;
-Atom _net_wm_name;
-Atom _net_workarea;
-Atom _net_client_list;
-Atom _net_number_of_desktops;
+char *netatom_names[] = {
+  "_NET_WM_PID",
+  "_NET_SUPPORTED",
+  "_NET_ACTIVE_WINDOW",
+  "_NET_WM_WINDOW_TYPE",
+  "_NET_WM_WINDOW_TYPE_DIALOG",
+  "_NET_WM_WINDOW_TYPE_DOCK",
+  "_NET_WM_NAME",
+  "_NET_WORKAREA",
+  "_NET_CLIENT_LIST",
+  "_NET_NUMBER_OF_DESKTOPS"
+};
+Atom netatoms[ATOM_COUNT];
 
 int rp_current_screen;
 rp_screen *screens;
@@ -263,7 +266,7 @@ set_rp_window_focus (rp_window *win)
   PRINT_DEBUG (("Giving focus to '%s'\n", window_name (win)));
   XSetInputFocus (dpy, win->w,
                   RevertToPointerRoot, CurrentTime);
-  XChangeProperty(dpy, win->scr->root, _net_active_window, XA_WINDOW, 32,
+  XChangeProperty(dpy, win->scr->root, netatoms[_NET_ACTIVE_WINDOW], XA_WINDOW, 32,
     PropModeReplace, (unsigned char *)&win->w, 1);
 }
 

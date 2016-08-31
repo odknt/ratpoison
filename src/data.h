@@ -422,4 +422,20 @@ struct rp_xselection
   int len;
 };
 
+enum
+{
+  _NET_WM_PID = 0,
+  _NET_SUPPORTED,
+  _NET_ACTIVE_WINDOW,
+  _NET_WM_WINDOW_TYPE,
+  _NET_WM_WINDOW_TYPE_DIALOG,
+  _NET_WM_WINDOW_TYPE_DOCK,
+  _NET_WM_NAME,
+  _NET_WORKAREA,
+  _NET_CLIENT_LIST,
+  _NET_NUMBER_OF_DESKTOPS,
+
+  ATOM_COUNT
+} NetAtomEnum;
+
 #endif /* _RATPOISON_DATA_H */

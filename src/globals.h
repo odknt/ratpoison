@@ -133,16 +133,8 @@ extern Atom xa_compound_text;
 extern Atom xa_utf8_string;
 
 /* netwm atoms. */
-extern Atom _net_wm_pid;
-extern Atom _net_supported;
-extern Atom _net_active_window;
-extern Atom _net_wm_window_type;
-extern Atom _net_wm_window_type_dialog;
-extern Atom _net_wm_window_type_dock;
-extern Atom _net_wm_name;
-extern Atom _net_workarea;
-extern Atom _net_client_list;
-extern Atom _net_number_of_desktops;
+extern char *netatom_names[];
+extern Atom netatoms[ATOM_COUNT];
 
 /* mouse properties */
 extern int rat_x;

@@ -719,18 +719,7 @@ main (int argc, char *argv[])
   wm_colormaps = XInternAtom(dpy, "WM_COLORMAP_WINDOWS", False);
 
   /* netwm atoms */
-  _net_wm_pid = XInternAtom(dpy, "_NET_WM_PID", False);
-  PRINT_DEBUG (("_NET_WM_PID = %ld\n", _net_wm_pid));
-  _net_supported = XInternAtom(dpy, "_NET_SUPPORTED", False);
-  PRINT_DEBUG (("_NET_SUPPORTED = %ld\n", _net_supported));
-  _net_active_window = XInternAtom(dpy, "_NET_ACTIVE_WINDOW", False);
-  _net_wm_window_type = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE", False);
-  _net_wm_window_type_dialog = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DIALOG", False);
-  _net_wm_window_type_dock = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DOCK", False);
-  _net_wm_name = XInternAtom(dpy, "_NET_WM_NAME", False);
-  _net_workarea = XInternAtom(dpy, "_NET_WORKAREA", False);
-  _net_client_list = XInternAtom(dpy, "_NET_CLIENT_LIST", False);
-  _net_number_of_desktops = XInternAtom(dpy, "_NET_NUMBER_OF_DESKTOPS", False);
+  XInternAtoms(dpy, netatom_names, ATOM_COUNT, False, netatoms);
 
   /* Setup signal handlers. */
   XSetErrorHandler(handler);

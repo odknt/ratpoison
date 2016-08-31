@@ -605,7 +605,7 @@ property_notify (XEvent *ev)
 
   if (win)
     {
-      if (ev->xproperty.atom == _net_wm_pid)
+      if (ev->xproperty.atom == netatoms[_NET_WM_PID])
         {
           struct rp_child_info *child_info;
 

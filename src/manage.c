@@ -208,7 +208,7 @@ get_wmname (Window w)
       int format;
       unsigned char *val = NULL;
 
-      ret = XGetWindowProperty (dpy, w, _net_wm_name, 0, 40, False,
+      ret = XGetWindowProperty (dpy, w, netatoms[_NET_WM_NAME], 0, 40, False,
 				xa_utf8_string, &type, &format, &nitems,
 				&bytes_after, &val);
       /* We have a valid UTF-8 string */
@@ -393,7 +393,7 @@ get_net_wm_window_type (rp_window *win)
   if (win == NULL)
     return None;
 
-  if (XGetWindowProperty (dpy, win->w, _net_wm_window_type, 0, 1L,
+  if (XGetWindowProperty (dpy, win->w, netatoms[_NET_WM_WINDOW_TYPE], 0, 1L,
                           False, XA_ATOM, &type, &format,
                           &nitems, &bytes_left,
                           &data) == Success && nitems > 0)
@@ -429,7 +429,7 @@ update_window_information (rp_window *win)
   /* Transient status */
   win->transient = XGetTransientForHint (dpy, win->w, &win->transient_for);
 
-  if (get_net_wm_window_type(win) == _net_wm_window_type_dialog)
+  if (get_net_wm_window_type(win) == netatoms[_NET_WM_WINDOW_TYPE_DIALOG])
     win->transient = 1;
 
   update_window_gravity (win);
@@ -874,7 +874,7 @@ update_client_list (rp_window *win)
     list[i++] = cur->w;
 
   XChangeProperty (dpy, RootWindow (dpy, win->scr->screen_num),
-    _net_client_list, XA_WINDOW, 32, PropModeReplace,
+    netatoms[_NET_CLIENT_LIST], XA_WINDOW, 32, PropModeReplace,
     (unsigned char*)list, list_num);
 
   free(list);

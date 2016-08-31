@@ -3947,7 +3947,7 @@ set_padding (struct cmdarg **args)
       workarea[2] = screens[i].width - defaults.padding_left - defaults.padding_right;
       workarea[3] = screens[i].height - defaults.padding_top - defaults.padding_bottom;
 
-      XChangeProperty(dpy, RootWindow (dpy, screens[i].screen_num), _net_workarea, XA_CARDINAL, 32, PropModeReplace, (unsigned char *) &workarea, 4);
+      XChangeProperty(dpy, RootWindow (dpy, screens[i].screen_num), netatoms[_NET_WORKAREA], XA_CARDINAL, 32, PropModeReplace, (unsigned char *) &workarea, 4);
     }
 
   return cmdret_new (RET_SUCCESS, NULL);
@@ -6203,7 +6203,7 @@ cmd_vinit (int interactive, struct cmdarg **args)
 
   /* set num of desktops */
   XChangeProperty (dpy, RootWindow (dpy, screen->screen_num),
-    _net_number_of_desktops, XA_CARDINAL, 32, PropModeReplace,
+    netatoms[_NET_NUMBER_OF_DESKTOPS], XA_CARDINAL, 32, PropModeReplace,
     (unsigned char*)&defaults.virtuals, 1);
 
   /* start in workspace 1 */

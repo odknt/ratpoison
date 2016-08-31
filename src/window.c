@@ -119,7 +119,7 @@ get_child_info (Window w)
   unsigned long bytes_after;
   unsigned char *req;
 
-  status = XGetWindowProperty (dpy, w, _net_wm_pid,
+  status = XGetWindowProperty (dpy, w, netatoms[_NET_WM_PID],
                                0, 0, False, XA_CARDINAL,
                                &type_ret, &format_ret, &nitems, &bytes_after, &req);
 
@@ -133,7 +133,7 @@ get_child_info (Window w)
      the property is zero length. */
   XFree (req);
 
-  status = XGetWindowProperty (dpy, w, _net_wm_pid,
+  status = XGetWindowProperty (dpy, w, netatoms[_NET_WM_PID],
                                0, (bytes_after / 4) + (bytes_after % 4 ? 1 : 0),
                                False, XA_CARDINAL, &type_ret, &format_ret, &nitems,
                                &bytes_after, &req);

@@ -245,7 +245,7 @@ init_screen (rp_screen *s, int screen_num)
   char *colon;
   long win_type[1];
 
-  win_type[0] = _net_wm_window_type_dock;
+  win_type[0] = netatoms[_NET_WM_WINDOW_TYPE_DOCK];
 
   /* We use screen_num below to refer to the real X screen number, but
    * if we're using Xinerama, it will only be the Xinerama logical screen
@@ -334,7 +334,7 @@ init_screen (rp_screen *s, int screen_num)
   s->bar_window = XCreateSimpleWindow (dpy, s->root, 0, 0, 1, 1,
                                        defaults.bar_border_width,
                                        s->fg_color, s->bg_color);
-  XChangeProperty (dpy, s->bar_window, _net_wm_window_type, XA_ATOM, 32,
+  XChangeProperty (dpy, s->bar_window, netatoms[_NET_WM_WINDOW_TYPE], XA_ATOM, 32,
                    PropModeReplace, (unsigned char *)&win_type, 1L);
 
 
@@ -343,7 +343,7 @@ init_screen (rp_screen *s, int screen_num)
   s->key_window = XCreateSimpleWindow (dpy, s->root, 0, 0, 1, 1, 0,
                                        WhitePixel (dpy, s->screen_num),
                                        BlackPixel (dpy, s->screen_num));
-  XChangeProperty (dpy, s->key_window, _net_wm_window_type, XA_ATOM, 32,
+  XChangeProperty (dpy, s->key_window, netatoms[_NET_WM_WINDOW_TYPE], XA_ATOM, 32,
                    PropModeReplace, (unsigned char *)&win_type, 1L);
   XSelectInput (dpy, s->key_window, KeyPressMask | KeyReleaseMask);
 
@@ -351,7 +351,7 @@ init_screen (rp_screen *s, int screen_num)
   s->input_window = XCreateSimpleWindow (dpy, s->root, 0, 0, 1, 1,
                                          defaults.bar_border_width,
                                          s->fg_color, s->bg_color);
-  XChangeProperty (dpy, s->input_window, _net_wm_window_type, XA_ATOM, 32,
+  XChangeProperty (dpy, s->input_window, netatoms[_NET_WM_WINDOW_TYPE], XA_ATOM, 32,
                    PropModeReplace, (unsigned char *)&win_type, 1L);
   XSelectInput (dpy, s->input_window, KeyPressMask | KeyReleaseMask);
 
@@ -359,13 +359,13 @@ init_screen (rp_screen *s, int screen_num)
   s->frame_window = XCreateSimpleWindow (dpy, s->root, 1, 1, 1, 1,
                                          defaults.bar_border_width,
                                          s->fg_color, s->bg_color);
-  XChangeProperty (dpy, s->frame_window, _net_wm_window_type, XA_ATOM, 32,
+  XChangeProperty (dpy, s->frame_window, netatoms[_NET_WM_WINDOW_TYPE], XA_ATOM, 32,
                    PropModeReplace, (unsigned char *)&win_type, 1L);
 
   /* Create the help window */
   s->help_window = XCreateSimpleWindow (dpy, s->root, s->left, s->top, s->width,
                                         s->height, 0, s->fg_color, s->bg_color);
-  XChangeProperty (dpy, s->help_window, _net_wm_window_type, XA_ATOM, 32,
+  XChangeProperty (dpy, s->help_window, netatoms[_NET_WM_WINDOW_TYPE], XA_ATOM, 32,
                    PropModeReplace, (unsigned char *)&win_type, 1L);
   XSelectInput (dpy, s->help_window, KeyPressMask);
 
@@ -408,12 +408,12 @@ activate_screen (rp_screen *s)
 {
   /* Add netwm support. FIXME: I think this is busted. */
   XChangeProperty (dpy, RootWindow (dpy, s->screen_num),
-		   _net_supported, XA_ATOM, 32, PropModeReplace, 
-		   (unsigned char*)&_net_wm_pid, 1);
+		   netatoms[_NET_SUPPORTED], XA_ATOM, 32, PropModeReplace, 
+		   (unsigned char*)netatoms, ATOM_COUNT);
 
   /* set window manager name */
   XChangeProperty (dpy, RootWindow (dpy, s->screen_num),
-		   _net_wm_name, xa_utf8_string, 8, PropModeReplace,
+		   netatoms[_NET_WM_NAME], xa_utf8_string, 8, PropModeReplace,
 		   (unsigned char*)"ratpoison", 9);
   XMapWindow (dpy, s->key_window);
 }
@@ -426,9 +426,9 @@ deactivate_screen (rp_screen *s)
 
   /* delete everything so noone sees them while we are not there */
   XDeleteProperty (dpy, RootWindow (dpy, s->screen_num),
-		   _net_supported);
+		   netatoms[_NET_SUPPORTED]);
   XDeleteProperty (dpy, RootWindow (dpy, s->screen_num),
-		   _net_wm_name);
+		   netatoms[_NET_WM_NAME]);
 }
 
 static int
