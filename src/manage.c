@@ -862,7 +862,7 @@ force_maximize (rp_window *win)
 
 /* update _NET_CLIENT_LIST */
 void
-update_client_list (rp_window *win)
+update_client_list (rp_screen *s)
 {
   int i = 0, list_num;
 
@@ -873,7 +873,7 @@ update_client_list (rp_window *win)
   list_for_each_entry (cur, &rp_mapped_window, node)
     list[i++] = cur->w;
 
-  XChangeProperty (dpy, RootWindow (dpy, win->scr->screen_num),
+  XChangeProperty (dpy, RootWindow (dpy, s->screen_num),
     netatoms[_NET_CLIENT_LIST], XA_WINDOW, 32, PropModeReplace,
     (unsigned char*)list, list_num);
 
@@ -915,7 +915,7 @@ map_window (rp_window *win)
     show_rudeness_msg (win, 0);
 
   /* set client list in the screen */
-  update_client_list(win);
+  update_client_list(win->scr);
 
   hook_run (&rp_new_window_hook);
 }
@@ -1008,7 +1008,7 @@ withdraw_window (rp_window *win)
   ignore_badwindow--;
 
   /* set client list in the screen */
-  update_client_list(win);
+  update_client_list(win->scr);
 
   /* Call our hook */
   hook_run (&rp_delete_window_hook);
