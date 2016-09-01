@@ -61,6 +61,7 @@ char *netatom_names[] = {
   "_NET_WM_WINDOW_TYPE_DIALOG",
   "_NET_WM_WINDOW_TYPE_DOCK",
   "_NET_WM_NAME",
+  "_NET_WM_DESKTOP",
   "_NET_WORKAREA",
   "_NET_CLIENT_LIST",
   "_NET_NUMBER_OF_DESKTOPS"

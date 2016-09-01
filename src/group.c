@@ -388,6 +388,9 @@ group_add_window (rp_group *g, rp_window *w)
   we->win = w;
   we->number = -1;
 
+  XChangeProperty (dpy, w->w, netatoms[_NET_WM_DESKTOP], XA_CARDINAL, 32,
+    PropModeReplace, (unsigned char *)&g->number, 1);
+
   /* Finally, add it to our list. */
   list_add_tail (&we->node, &g->unmapped_windows);
 }
@@ -600,6 +603,10 @@ group_move_window (rp_group *to, rp_window *win)
   /* and shove it into the other one. */
   we->number = numset_request (to->numset);
   group_insert_window (&to->mapped_windows, we);
+
+  /* update _NET_WM_DESKTOP */
+  XChangeProperty (dpy, win->w, netatoms[_NET_WM_DESKTOP], XA_CARDINAL, 32,
+    PropModeReplace, (unsigned char *)&to->number, 1);
 }
 
 void
