@@ -40,7 +40,7 @@ long get_state (rp_window *win);
 
 int window_is_transient (rp_window *win);
 void update_window_information (rp_window *win);
-void update_client_list (rp_screen *win);
+void update_net_client_list (rp_screen *win);
 void map_window (rp_window *win);
 
 void maximize (rp_window *win);
@@ -58,6 +58,6 @@ void unhide_window_below (rp_window *win);
 void withdraw_window (rp_window *win);
 void hide_others (rp_window *win);
 
-void update_desktop_information (rp_screen *screen);
+void update_net_desktop_information (rp_screen *screen);
 
 #endif /* ! _RATPOISION_MANAGE_H */

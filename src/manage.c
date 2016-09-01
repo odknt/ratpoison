@@ -862,7 +862,7 @@ force_maximize (rp_window *win)
 
 /* update _NET_CLIENT_LIST */
 void
-update_client_list (rp_screen *s)
+update_net_client_list (rp_screen *s)
 {
   int i = 0, list_num;
 
@@ -915,7 +915,7 @@ map_window (rp_window *win)
     show_rudeness_msg (win, 0);
 
   /* set client list in the screen */
-  update_client_list(win->scr);
+  update_net_client_list(win->scr);
 
   hook_run (&rp_new_window_hook);
 }
@@ -1008,7 +1008,7 @@ withdraw_window (rp_window *win)
   ignore_badwindow--;
 
   /* set client list in the screen */
-  update_client_list(win->scr);
+  update_net_client_list(win->scr);
 
   /* Call our hook */
   hook_run (&rp_delete_window_hook);
@@ -1036,9 +1036,9 @@ hide_others (rp_window *win)
     }
 }
 
-/* Update desktop information for NETWM */
+/* Update _NET_NUMBER_OF_DESKTOPS, _NET_DESKTOP_NAMES */
 void
-update_desktop_information (rp_screen *screen)
+update_net_desktop_information (rp_screen *screen)
 {
   int i, size, pos = 0, names_len = 0;
   rp_group *cur;

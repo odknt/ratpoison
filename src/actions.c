@@ -5324,7 +5324,7 @@ cmd_grename (int interactive UNUSED, struct cmdarg **args)
   /* Update the group list. */
   update_group_names (current_screen());
 
-  update_desktop_information (current_screen());
+  update_net_desktop_information (current_screen());
 
   return cmdret_new (RET_SUCCESS, NULL);
 }
@@ -5469,7 +5469,7 @@ cmd_gdelete (int interactive UNUSED, struct cmdarg **args)
   switch (group_delete_group (g))
     {
     case GROUP_DELETE_GROUP_OK:
-      update_desktop_information (current_screen());
+      update_net_desktop_information (current_screen());
       break;
     case GROUP_DELETE_GROUP_NONEMPTY:
       return cmdret_new (RET_FAILURE, "gdelete: non-empty group");
@@ -6204,7 +6204,7 @@ cmd_vinit (int interactive, struct cmdarg **args)
     list_add_tail (&v->node, &rp_virtuals);
   }
 
-  update_desktop_information (screen);
+  update_net_desktop_information (screen);
 
   /* start in workspace 1 */
   PRINT_DEBUG (("vinit: selecting default\n"));
