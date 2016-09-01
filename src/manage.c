@@ -1035,3 +1035,38 @@ hide_others (rp_window *win)
       hide_window (cur);
     }
 }
+
+/* Update desktop information for NETWM */
+void
+update_desktop_information (rp_screen *screen)
+{
+  int i, size, pos = 0, names_len = 0;
+  rp_group *cur;
+  char *names;
+
+  list_for_each_entry (cur, &rp_groups, node)
+    {
+      names_len += strlen(cur->name) + 1;
+    }
+  names = xmalloc(names_len);
+  list_for_each_entry (cur, &rp_groups, node)
+    {
+      for (i = 0; i < strlen(cur->name) + 1; i++, pos++)
+        {
+          names[pos] = cur->name[i];
+        }
+    }
+
+  /* set _NET_DESKTOP_NAMES */
+  XChangeProperty (dpy, RootWindow (dpy, screen->screen_num),
+    netatoms[_NET_DESKTOP_NAMES], xa_utf8_string, 8, PropModeReplace,
+    (unsigned char*)names, names_len);
+
+  /* set _NET_NUMBER_OF_DESKTOPS */
+  size = list_size (&rp_groups);
+  XChangeProperty (dpy, RootWindow (dpy, screen->screen_num),
+    netatoms[_NET_NUMBER_OF_DESKTOPS], XA_CARDINAL, 32, PropModeReplace,
+    (unsigned char*)&size, 1);
+
+  free(names);
+}

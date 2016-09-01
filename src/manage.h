@@ -58,4 +58,6 @@ void unhide_window_below (rp_window *win);
 void withdraw_window (rp_window *win);
 void hide_others (rp_window *win);
 
+void update_desktop_information (rp_screen *screen);
+
 #endif /* ! _RATPOISION_MANAGE_H */
