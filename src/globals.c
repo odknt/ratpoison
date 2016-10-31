@@ -67,11 +67,11 @@ rp_screen *screens;
 int num_screens;
 Display *dpy;
 
-rp_virtual *rp_current_virtual;
-LIST_HEAD (rp_virtuals);
+rp_virtual **rp_current_virtuals = NULL;
+struct list_head *rp_virtuals = NULL;
 
-rp_group *rp_current_group;
-LIST_HEAD (rp_groups);
+rp_group **rp_current_group = NULL;
+struct list_head *rp_groups = NULL;
 LIST_HEAD (rp_children);
 struct rp_defaults defaults;
 

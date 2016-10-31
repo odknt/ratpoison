@@ -400,7 +400,7 @@ get_net_wm_window_type (rp_window *win)
     {
       window_type = *(Atom *)data;
       XFree (data);
-      PRINT_DEBUG(("hey ya %ld %ld\n", window_type, _net_wm_window_type_dialog));
+//      PRINT_DEBUG(("hey ya %ld %ld\n", window_type, _net_wm_window_type_dialog));
     }
 
   return window_type;
