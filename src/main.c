@@ -735,10 +735,10 @@ main (int argc, char *argv[])
   /* Setup ratpoison's internal structures */
   init_defaults ();
   init_xkb ();
-  init_groups ();
-  init_window_stuff ();
   init_xinerama ();
   init_screens (screen_arg, screen_num);
+  init_groups ();
+  init_window_stuff ();
 
   init_frame_lists ();
   update_modifier_map ();

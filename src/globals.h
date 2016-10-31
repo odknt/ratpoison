@@ -77,9 +77,9 @@
 #endif
 
 /* The list of groups. */
-extern struct list_head rp_groups;
+extern struct list_head *rp_groups;
 
-extern rp_group *rp_current_group;
+extern rp_group **rp_current_group;
 
 /* Each child process is stored in this list. spawn, creates a new
    entry in this list, the SIGCHLD handler sets child.terminated to be
@@ -90,8 +90,8 @@ extern struct list_head rp_children;
 
 extern struct rp_defaults defaults;
 
-extern rp_virtual *rp_current_virtual;
-extern struct list_head rp_virtuals;
+extern rp_virtual **rp_current_virtuals;
+extern struct list_head *rp_virtuals;
 
 /* Cached font info. */
 extern int rp_font_ascent, rp_font_descent, rp_font_width;

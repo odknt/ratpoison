@@ -278,7 +278,7 @@ find_window_for_frame (rp_frame *frame)
   rp_window_elem *most_recent = NULL;
   rp_window_elem *cur;
 
-  list_for_each_entry (cur, &rp_current_group->mapped_windows, node)
+  list_for_each_entry (cur, &rp_current_group[s->xine_screen_num]->mapped_windows, node)
     {
       if ((cur->win->scr == s || rp_have_xinerama)
           && cur->win != current_window()

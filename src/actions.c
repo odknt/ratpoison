@@ -1234,7 +1234,7 @@ cmd_prev (int interactive UNUSED, struct cmdarg **args UNUSED)
 {
   rp_window *cur, *win;
   cur = current_window();
-  win = group_prev_window (rp_current_group, cur);
+  win = group_prev_window (rp_current_group[current_screen()->xine_screen_num], cur);
 
   if (win)
     set_active_window (win);
@@ -1265,7 +1265,7 @@ cmd_next (int interactive UNUSED, struct cmdarg **args UNUSED)
 {
   rp_window *cur, *win;
   cur = current_window();
-  win = group_next_window (rp_current_group, cur);
+  win = group_next_window (rp_current_group[current_screen()->xine_screen_num], cur);
 
   if (win)
     set_active_window (win);
@@ -1297,7 +1297,7 @@ cmd_other (int interactive UNUSED, struct cmdarg **args UNUSED)
   rp_window *w;
 
 /*   w = find_window_other (); */
-  w = group_last_window (rp_current_group, current_screen());
+  w = group_last_window (rp_current_group[current_screen()->xine_screen_num], current_screen());
 
   if (!w)
     return cmdret_new (RET_FAILURE, "%s", MESSAGE_NO_OTHER_WINDOW);
@@ -1370,7 +1370,7 @@ window_completions (char* str UNUSED)
   INIT_LIST_HEAD (list);
 
   /* Gather the names of all the windows. */
-  list_for_each_entry (cur, &rp_current_group->mapped_windows, node)
+  list_for_each_entry (cur, &rp_current_group[current_screen()->xine_screen_num]->mapped_windows, node)
     {
       struct sbuf *name;
 
@@ -1413,7 +1413,7 @@ cmd_select (int interactive UNUSED, struct cmdarg **args)
       /* try by number */
       else if ((n = string_to_positive_int (str)) >= 0)
         {
-          rp_window_elem *elem = group_find_window_by_number (rp_current_group, n);
+          rp_window_elem *elem = group_find_window_by_number (rp_current_group[current_screen()->xine_screen_num], n);
 
           if (elem)
             {
@@ -1651,7 +1651,7 @@ group_completions (char *str UNUSED)
   INIT_LIST_HEAD (list);
 
   /* Grab all the group names. */
-  list_for_each_entry (cur, &rp_groups, node)
+  list_for_each_entry (cur, &rp_groups[current_screen()->xine_screen_num], node)
     {
       struct sbuf *s;
 
@@ -1928,7 +1928,7 @@ read_window (struct argspec *spec, struct sbuf *s, struct cmdarg **arg)
       /* try by number */
       if ((n = string_to_positive_int (name)) >= 0)
         {
-          rp_window_elem *elem = group_find_window_by_number (rp_current_group, n);
+          rp_window_elem *elem = group_find_window_by_number (rp_current_group[current_screen()->xine_screen_num], n);
           if (elem)
             win = elem->win;
         }
@@ -2025,22 +2025,23 @@ static rp_group *
 find_group (char *str)
 {
   rp_group *group;
+  rp_screen *screen = current_screen();
   int n;
 
   /* Check if the user typed a group number. */
   n = string_to_positive_int (str);
   if (n >= 0)
     {
-      group = groups_find_group_by_number (n);
+      group = groups_find_group_by_number (screen, n);
       if (group)
         return group;
     }
 
   /* Exact matches are special cases. */
-  if ((group = groups_find_group_by_name (str, 1)))
+  if ((group = groups_find_group_by_name (screen, str, 1)))
     return group;
 
-  group = groups_find_group_by_name (str, 0);
+  group = groups_find_group_by_name (screen, str, 0);
   return group;
 }
 
@@ -2739,7 +2740,7 @@ spawn(char *cmd, int raw, rp_frame *frame)
   child->pid = pid;
   child->terminated = 0;
   child->frame = frame;
-  child->group = rp_current_group;
+  child->group = rp_current_group[current_screen()->xine_screen_num];
   child->screen = current_screen();
   child->window_mapped = 0;
 
@@ -2797,33 +2798,34 @@ cmd_number (int interactive UNUSED, struct cmdarg **args)
   /* Gather the args. */
   new_number = ARG(0,number);
   if (args[1])
-    win = group_find_window_by_number (rp_current_group, ARG(1,number));
+    win = group_find_window_by_number
+    (rp_current_group[current_screen()->xine_screen_num], ARG(1,number));
   else
-    win = group_find_window (&rp_current_group->mapped_windows, current_window());
+    win = group_find_window (&rp_current_group[current_screen()->xine_screen_num]->mapped_windows, current_window());
 
   /* Make the switch. */
   if ( new_number >= 0 && win)
     {
       /* Find other window with same number and give it old number. */
-      other_win = group_find_window_by_number (rp_current_group, new_number);
+      other_win = group_find_window_by_number (rp_current_group[current_screen()->xine_screen_num], new_number);
       if (other_win != NULL)
         {
           old_number = win->number;
           other_win->number = old_number;
 
           /* Resort the window in the list */
-          group_resort_window (rp_current_group, other_win);
+          group_resort_window (rp_current_group[current_screen()->xine_screen_num], other_win);
         }
       else
         {
-          numset_release (rp_current_group->numset, win->number);
+          numset_release (rp_current_group[current_screen()->xine_screen_num]->numset, win->number);
         }
 
       win->number = new_number;
-      numset_add_num (rp_current_group->numset, new_number);
+      numset_add_num (rp_current_group[current_screen()->xine_screen_num]->numset, new_number);
 
       /* resort the the window in the list */
-      group_resort_window (rp_current_group, win);
+      group_resort_window (rp_current_group[current_screen()->xine_screen_num], win);
 
       /* Update the window list. */
       update_window_names (win->win->scr, defaults.window_fmt);
@@ -4440,9 +4442,9 @@ cmd_info (int interactive UNUSED, struct cmdarg **args)
     {
       rp_window *win = current_window();
       rp_window_elem *win_elem;
-      win_elem = group_find_window (&rp_current_group->mapped_windows, win);
+      win_elem = group_find_window (&rp_current_group[win->scr->xine_screen_num]->mapped_windows, win);
       if (!win_elem)
-        win_elem = group_find_window (&rp_current_group->unmapped_windows, win);
+        win_elem = group_find_window (&rp_current_group[win->scr->xine_screen_num]->unmapped_windows, win);
       if (!win_elem)
         {
           rp_group *g = groups_find_group_by_window(win);
@@ -5232,39 +5234,48 @@ set_winliststyle (struct cmdarg **args)
 cmdret *
 cmd_gnext (int interactive UNUSED, struct cmdarg **args UNUSED)
 {
-  set_current_group (group_next_group ());
+  set_current_group (current_screen(), group_next_group (current_screen()));
   return cmdret_new (RET_SUCCESS, NULL);
 }
 
 cmdret *
 cmd_gprev (int interactive UNUSED, struct cmdarg **args UNUSED)
 {
-  set_current_group (group_prev_group ());
+  set_current_group (current_screen(), group_prev_group (current_screen()));
   return cmdret_new (RET_SUCCESS, NULL);
 }
 
 cmdret *
 cmd_gother (int interactive UNUSED, struct cmdarg **args UNUSED)
 {
-  set_current_group (group_last_group ());
+  set_current_group (current_screen(), group_last_group (current_screen()));
   return cmdret_new (RET_SUCCESS, NULL);
 }
 
 cmdret *
 cmd_gnew (int interactive UNUSED, struct cmdarg **args)
 {
-  if (groups_find_group_by_name (ARG_STRING (0), 1))
-    return cmdret_new (RET_FAILURE, "gnew: group already exists");
-  set_current_group (group_add_new_group (ARG_STRING(0)));
+  int i;
+
+  for (i = 0; i < num_screens; i++) {
+    if (groups_find_group_by_name (&screens[i], ARG_STRING (0), 1))
+      return cmdret_new (RET_FAILURE, "gnew: group already exists");
+    set_current_group (&screens[i], group_add_new_group (&screens[i], ARG_STRING(0)));
+  }
+
   return cmdret_new (RET_SUCCESS, NULL);
+  // if (groups_find_group_by_name (current_screen(), ARG_STRING (0), 1))
+  //   return cmdret_new (RET_FAILURE, "gnew: group already exists");
+  // set_current_group (current_screen(), group_add_new_group (current_screen(), ARG_STRING(0)));
+  // return cmdret_new (RET_SUCCESS, NULL);
 }
 
 cmdret *
 cmd_gnewbg (int interactive UNUSED, struct cmdarg **args)
 {
-  if (groups_find_group_by_name (ARG_STRING (0), 1))
+  if (groups_find_group_by_name (current_screen(), ARG_STRING (0), 1))
     return cmdret_new (RET_FAILURE, "gnewbg: group already exists");
-  group_add_new_group (ARG_STRING(0));
+  group_add_new_group (current_screen(), ARG_STRING(0));
   return cmdret_new (RET_SUCCESS, NULL);
 }
 
@@ -5273,28 +5284,29 @@ cmd_gnumber (int interactive UNUSED, struct cmdarg **args)
 {
   int old_number, new_number;
   rp_group *other_g, *g;
+  rp_screen *screen = current_screen();
 
   struct numset *g_numset = group_get_numset();
 
   /* Gather the args. */
   new_number = ARG(0,number);
   if (args[1])
-    g = groups_find_group_by_number (ARG(1,number));
+    g = groups_find_group_by_number (screen, ARG(1,number));
   else
-    g = rp_current_group;
+    g = rp_current_group[screen->xine_screen_num];
 
   /* Make the switch. */
   if (new_number >= 0 && g)
     {
       /* Find other window with same number and give it old number. */
-      other_g = groups_find_group_by_number (new_number);
+      other_g = groups_find_group_by_number (screen, new_number);
       if (other_g != NULL)
         {
           old_number = g->number;
           other_g->number = old_number;
 
           /* Resort the window in the list */
-          group_resort_group (other_g);
+          group_resort_group (screen, other_g);
         }
       else
         {
@@ -5305,7 +5317,7 @@ cmd_gnumber (int interactive UNUSED, struct cmdarg **args)
       numset_add_num (g_numset, new_number);
 
       /* resort the the window in the list */
-      group_resort_group (g);
+      group_resort_group (screen, g);
 
       /* Update the group list. */
       update_group_names (current_screen());
@@ -5317,9 +5329,9 @@ cmd_gnumber (int interactive UNUSED, struct cmdarg **args)
 cmdret *
 cmd_grename (int interactive UNUSED, struct cmdarg **args)
 {
-  if (groups_find_group_by_name (ARG_STRING (0), 1))
+  if (groups_find_group_by_name (current_screen(), ARG_STRING (0), 1))
     return cmdret_new (RET_FAILURE, "grename: duplicate group name");
-  group_rename (rp_current_group, ARG_STRING(0));
+  group_rename (rp_current_group[current_screen()->xine_screen_num], ARG_STRING(0));
 
   /* Update the group list. */
   update_group_names (current_screen());
@@ -5337,7 +5349,7 @@ cmd_gselect (int interactive, struct cmdarg **args)
   g = find_group (ARG_STRING(0));
 
   if (g)
-    set_current_group (g);
+    set_current_group (current_screen(), g);
   else
     return cmd_groups (interactive, NULL);
 
@@ -5370,7 +5382,7 @@ cmd_groups (int interactive, struct cmdarg **args UNUSED)
       cmdret *ret;
 
       group_list = sbuf_new (0);
-      get_group_list ("\n", group_list, &dummy, &dummy);
+      get_group_list (current_screen(), "\n", group_list, &dummy, &dummy);
       ret = cmdret_new (RET_SUCCESS, "%s", sbuf_get (group_list));
       sbuf_free (group_list);
       return ret;
@@ -5391,7 +5403,7 @@ cmd_gmove (int interactive UNUSED, struct cmdarg **args)
 cmdret *
 cmd_gmerge (int interactive UNUSED, struct cmdarg **args)
 {
-  groups_merge (ARG(0,group), rp_current_group);
+  groups_merge (ARG(0,group), rp_current_group[current_screen()->xine_screen_num]);
   return cmdret_new (RET_SUCCESS, NULL);
 }
 
@@ -5462,11 +5474,11 @@ cmd_gdelete (int interactive UNUSED, struct cmdarg **args)
   rp_group *g;
 
   if (args[0] == NULL)
-    g = rp_current_group;
+    g = rp_current_group[current_screen()->xine_screen_num];
   else
     g = ARG(0,group);
 
-  switch (group_delete_group (g))
+  switch (group_delete_group (current_screen(), g))
     {
     case GROUP_DELETE_GROUP_OK:
       update_net_desktop_information (current_screen());
@@ -5825,12 +5837,12 @@ cmd_cnext (int interactive, struct cmdarg **args)
     return cmd_next (interactive, args);
 
   /* CUR !in cycle list, so LAST marks last node. */
-  last = group_prev_window (rp_current_group, cur);
+  last = group_prev_window (rp_current_group[current_screen()->xine_screen_num], cur);
 
   if (last)
-    for (win = group_next_window (rp_current_group, cur);
+    for (win = group_next_window (rp_current_group[current_screen()->xine_screen_num], cur);
          win;
-         win = group_next_window (rp_current_group, win))
+         win = group_next_window (rp_current_group[current_screen()->xine_screen_num], win))
       {
         if (win->res_class
             && strcmp (cur->res_class, win->res_class))
@@ -5855,12 +5867,12 @@ cmd_cprev (int interactive, struct cmdarg **args)
     return cmd_next (interactive, args);
 
   /* CUR !in cycle list, so LAST marks last node. */
-  last = group_next_window (rp_current_group, cur);
+  last = group_next_window (rp_current_group[current_screen()->xine_screen_num], cur);
 
   if (last)
-    for (win = group_prev_window (rp_current_group, cur);
+    for (win = group_prev_window (rp_current_group[current_screen()->xine_screen_num], cur);
          win;
-         win = group_prev_window (rp_current_group, win))
+         win = group_prev_window (rp_current_group[current_screen()->xine_screen_num], win))
       {
         if (win->res_class
             && strcmp (cur->res_class, win->res_class))
@@ -5885,12 +5897,12 @@ cmd_inext (int interactive, struct cmdarg **args)
     return cmd_next (interactive, args);
 
   /* CUR !in cycle list, so LAST marks last node. */
-  last = group_prev_window (rp_current_group, cur);
+  last = group_prev_window (rp_current_group[current_screen()->xine_screen_num], cur);
 
   if (last)
-    for (win = group_next_window (rp_current_group, cur);
+    for (win = group_next_window (rp_current_group[current_screen()->xine_screen_num], cur);
          win;
-         win = group_next_window (rp_current_group, win))
+         win = group_next_window (rp_current_group[current_screen()->xine_screen_num], win))
       {
         if (win->res_class
             && !strcmp (cur->res_class, win->res_class))
@@ -5915,12 +5927,12 @@ cmd_iprev (int interactive, struct cmdarg **args)
     return cmd_next (interactive, args);
 
   /* CUR !in cycle list, so LAST marks last node. */
-  last = group_next_window (rp_current_group, cur);
+  last = group_next_window (rp_current_group[current_screen()->xine_screen_num], cur);
 
   if (last)
-    for (win = group_prev_window (rp_current_group, cur);
+    for (win = group_prev_window (rp_current_group[current_screen()->xine_screen_num], cur);
          win;
-         win = group_prev_window (rp_current_group, win))
+         win = group_prev_window (rp_current_group[current_screen()->xine_screen_num], win))
       {
         if (win->res_class
             && !strcmp (cur->res_class, win->res_class))
@@ -5942,7 +5954,7 @@ cmd_cother (int interactive UNUSED, struct cmdarg **args UNUSED)
 
   cur = current_window();
   if (cur)
-    w = group_last_window_by_class (rp_current_group, cur->res_class);
+    w = group_last_window_by_class (rp_current_group[current_screen()->xine_screen_num], cur->res_class);
 
   if (!w)
     return cmdret_new (RET_FAILURE, "%s", MESSAGE_NO_OTHER_WINDOW);
@@ -5959,7 +5971,7 @@ cmd_iother (int interactive UNUSED, struct cmdarg **args UNUSED)
 
   cur = current_window();
   if (cur)
-    w = group_last_window_by_class_complement (rp_current_group, cur->res_class);
+    w = group_last_window_by_class_complement (rp_current_group[current_screen()->xine_screen_num], cur->res_class);
 
   if (!w)
     return cmdret_new (RET_FAILURE, "%s", MESSAGE_NO_OTHER_WINDOW);
@@ -6144,15 +6156,13 @@ cmd_getsel (int interactive UNUSED, struct cmdarg **args UNUSED)
 cmdret *
 cmd_vdump (int interactive, struct cmdarg **args)
 {
-  struct cmdarg *arg;
-
   rp_virtual *cur;
 
-  arg = xmalloc (sizeof(struct cmdarg));
-
   PRINT_DEBUG (("virtual workspace config:\n"));
+  PRINT_DEBUG (("virtual current: %d\n", rp_current_virtuals[0]->number));
+  PRINT_DEBUG (("virtual current: %d\n", rp_current_virtuals[1]->number));
 
-  list_for_each_entry (cur, &rp_virtuals, node) {
+  list_for_each_entry (cur, &rp_virtuals[current_screen()->xine_screen_num], node) {
     PRINT_DEBUG ((" %d: %s\n", cur->number, cur->fconfig));
   }
 
@@ -6162,13 +6172,18 @@ cmd_vdump (int interactive, struct cmdarg **args)
 cmdret *
 cmd_vinit (int interactive, struct cmdarg **args)
 {
-  int x;
+  int x, y;
   char *input;
   struct cmdarg *arg;
-  rp_screen *screen = current_screen();
   rp_virtual *first;
+  rp_group *g;
 
-  INIT_LIST_HEAD (&rp_virtuals);
+  if (rp_current_virtuals != NULL && rp_virtuals != NULL){
+    return cmdret_new (RET_SUCCESS, NULL);
+  }
+
+  rp_current_virtuals = xmalloc (sizeof(rp_virtual) * num_screens);
+  rp_virtuals = xmalloc (sizeof(struct list_head) * num_screens);
 
   /* select - */
   PRINT_DEBUG (("vinit: selecting -\n"));
@@ -6182,45 +6197,46 @@ cmd_vinit (int interactive, struct cmdarg **args)
   cmd_only (0, NULL);
 
   /* create a new group for each virtual space and init frame config */
-  for (x = 1; x <= defaults.virtuals; x++) {
-    rp_virtual *v;
+  for (x = 0; x < num_screens; x++) {
+    INIT_LIST_HEAD (&rp_virtuals[x]);
+    for (y = 1; y <= defaults.virtuals; y++) {
+      rp_virtual *v;
 
-    if (x == 1)
-      input = xstrdup ("default");
-    else
-      input = xsprintf ("virtual%d", x);
+      if (y == 1)
+        input = xstrdup ("default");
+      else
+        input = xsprintf ("virtual%d", y);
 
-    PRINT_DEBUG (("vinit: creating space %d (%s)\n", x, input));
+      PRINT_DEBUG (("vinit: creating space %d (%s)\n", y, input));
 
-    (arg)->string = input;
-    cmd_gnew (0, &arg);
+      (arg)->string = input;
+      cmd_gnew (0, &arg);
 
-    v = xmalloc (sizeof (rp_virtual));
-    v->number = x;
-    v->fconfig = fdump (screen);
+      v = xmalloc (sizeof (rp_virtual));
+      v->number = y;
+      v->fconfig = fdump (&screens[x]);
 
-    rp_current_virtual = v;
+      rp_current_virtuals[x] = v;
 
-    list_add_tail (&v->node, &rp_virtuals);
+      list_add_tail (&v->node, &rp_virtuals[x]);
+    }
+
+    /* start in workspace 1 */
+    PRINT_DEBUG (("vinit: selecting default\n"));
+    g = groups_find_group_by_name(&screens[x], "default", 1);
+    set_current_group (&screens[x], g);
+    list_first (first, &rp_virtuals[x], node);
+    if (first) {
+      rp_current_virtuals[x] = first;
+
+      /* restore the frames */
+      PRINT_DEBUG (("vinit: restoring frame config\n"));
+      frestore (first->fconfig, &screens[x]);
+    } else {
+      PRINT_DEBUG (("vinit: no first virtual?!\n"));
+    }
   }
 
-  update_net_desktop_information (screen);
-
-  /* start in workspace 1 */
-  PRINT_DEBUG (("vinit: selecting default\n"));
-  input = xstrdup ("default");
-  (arg)->string = input;
-  cmd_gselect (0, &arg);
-  list_first (first, &rp_virtuals, node);
-  if (first) {
-    rp_current_virtual = first;
-
-    /* restore the frames */
-    PRINT_DEBUG (("vinit: restoring frame config\n"));
-    frestore (first->fconfig, screen);
-  } else
-    PRINT_DEBUG (("vinit: no first virtual?!\n"));
-  
   return cmdret_new (RET_SUCCESS, NULL);
 }
 
@@ -6236,14 +6252,14 @@ cmd_vmove (int interactive, struct cmdarg **args)
   if (current_window() == NULL)
     return cmdret_new (RET_FAILURE, "vmove: no focused window");
 
-  list_for_each_entry (cur, &rp_virtuals, node) {
+  list_for_each_entry (cur, &rp_virtuals[current_screen()->xine_screen_num], node) {
     if (cur->number == which) {
       if (which == 1)
         input = xstrdup ("default");
       else
         input = xsprintf ("virtual%d", cur->number);
 
-      if ((g = groups_find_group_by_name(input, 1)) != NULL) {
+      if ((g = groups_find_group_by_name(current_screen(), input, 1)) != NULL) {
         group_move_window (g, current_window());
 
         return cmdret_new (RET_SUCCESS, NULL);
@@ -6264,16 +6280,16 @@ cmd_vselect (int interactive, struct cmdarg **args)
   rp_virtual *cur;
   rp_screen *screen = current_screen();
 
-  if (rp_current_virtual->number == which)
+  if (rp_current_virtuals[screen->xine_screen_num]->number == which)
     /* don't bother */
     return cmdret_new (RET_SUCCESS, NULL);
 
   arg = xmalloc (sizeof(struct cmdarg));
 
   /* store the current frame config */
-  rp_current_virtual->fconfig = fdump (screen);
+  rp_current_virtuals[screen->xine_screen_num]->fconfig = fdump (screen);
 
-  list_for_each_entry (cur, &rp_virtuals, node) {
+  list_for_each_entry (cur, &rp_virtuals[screen->xine_screen_num], node) {
     if (cur->number == which) {
       if (which == 1)
         input = xstrdup ("default");
@@ -6288,7 +6304,7 @@ cmd_vselect (int interactive, struct cmdarg **args)
       /* restore this space's frame config */
       frestore (cur->fconfig, screen);
 
-      rp_current_virtual = cur;
+      rp_current_virtuals[screen->xine_screen_num] = cur;
 
       return cmdret_new (RET_SUCCESS, NULL);
     }

@@ -400,7 +400,7 @@ get_net_wm_window_type (rp_window *win)
     {
       window_type = *(Atom *)data;
       XFree (data);
-      PRINT_DEBUG(("hey ya %ld %ld\n", window_type, _net_wm_window_type_dialog));
+//      PRINT_DEBUG(("hey ya %ld %ld\n", window_type, _net_wm_window_type_dialog));
     }
 
   return window_type;
@@ -873,7 +873,7 @@ update_net_client_list (rp_screen *s)
   list_for_each_entry (cur, &rp_mapped_window, node)
     list[i++] = cur->w;
 
-  XChangeProperty (dpy, RootWindow (dpy, s->screen_num),
+  XChangeProperty (dpy, RootWindow (dpy, s->xine_screen_num),
     netatoms[_NET_CLIENT_LIST], XA_WINDOW, 32, PropModeReplace,
     (unsigned char*)list, list_num);
 
@@ -1044,12 +1044,12 @@ update_net_desktop_information (rp_screen *screen)
   rp_group *cur;
   char *names;
 
-  list_for_each_entry (cur, &rp_groups, node)
+  list_for_each_entry (cur, &rp_groups[screen->xine_screen_num], node)
     {
       names_len += strlen(cur->name) + 1;
     }
   names = xmalloc(names_len);
-  list_for_each_entry (cur, &rp_groups, node)
+  list_for_each_entry (cur, &rp_groups[screen->xine_screen_num], node)
     {
       for (i = 0; i < strlen(cur->name) + 1; i++, pos++)
         {
@@ -1058,13 +1058,13 @@ update_net_desktop_information (rp_screen *screen)
     }
 
   /* set _NET_DESKTOP_NAMES */
-  XChangeProperty (dpy, RootWindow (dpy, screen->screen_num),
+  XChangeProperty (dpy, RootWindow (dpy, screen->xine_screen_num),
     netatoms[_NET_DESKTOP_NAMES], xa_utf8_string, 8, PropModeReplace,
     (unsigned char*)names, names_len);
 
   /* set _NET_NUMBER_OF_DESKTOPS */
-  size = list_size (&rp_groups);
-  XChangeProperty (dpy, RootWindow (dpy, screen->screen_num),
+  size = list_size (&rp_groups[screen->xine_screen_num]);
+  XChangeProperty (dpy, RootWindow (dpy, screen->xine_screen_num),
     netatoms[_NET_NUMBER_OF_DESKTOPS], XA_CARDINAL, 32, PropModeReplace,
     (unsigned char*)&size, 1);
 

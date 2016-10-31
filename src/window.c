@@ -176,7 +176,7 @@ add_to_window_list (rp_screen *s, Window w)
   new_window->intended_frame_number = -1;
   new_window->named = 0;
   new_window->hints = XAllocSizeHints ();
-  new_window->colormap = DefaultColormap (dpy, s->screen_num);
+  new_window->colormap = DefaultColormap (dpy, s->xine_screen_num);
   new_window->transient = XGetTransientForHint (dpy, new_window->w, &new_window->transient_for);
   PRINT_DEBUG (("transient %d\n", new_window->transient));
 
@@ -201,7 +201,7 @@ add_to_window_list (rp_screen *s, Window w)
     rp_frame *frame = screen_find_frame_by_frame (child_info->screen, child_info->frame);
 
     PRINT_DEBUG(("frame=%p\n", frame));
-    group = groups_find_group_by_group (child_info->group);
+    group = groups_find_group_by_group (s, child_info->group);
     if (frame)
       frame_num = frame->number;
     /* Only map the first window in the launch frame. */
@@ -213,7 +213,7 @@ add_to_window_list (rp_screen *s, Window w)
   if (group)
     group_add_window (group, new_window);
   else
-    group_add_window (rp_current_group, new_window);
+    group_add_window (rp_current_group[s->xine_screen_num], new_window);
 
   PRINT_DEBUG(("frame_num: %d\n", frame_num));
   if (frame_num >= 0)
@@ -289,7 +289,7 @@ find_window_name (char *name, int exact_match)
 
   if (!exact_match)
     {
-      list_for_each_entry (cur, &rp_current_group->mapped_windows, node)
+      list_for_each_entry (cur, &rp_current_group[current_screen()->xine_screen_num]->mapped_windows, node)
         {
           if (str_comp (name, window_name (cur->win), strlen (name)))
             return cur->win;
@@ -297,7 +297,7 @@ find_window_name (char *name, int exact_match)
     }
   else
     {
-      list_for_each_entry (cur, &rp_current_group->mapped_windows, node)
+      list_for_each_entry (cur, &rp_current_group[current_screen()->xine_screen_num]->mapped_windows, node)
         {
           if (!strcmp (name, window_name (cur->win)))
             return cur->win;
@@ -355,7 +355,7 @@ find_window_next (rp_window *w)
 rp_window *
 find_window_other (rp_screen *screen)
 {
-  return group_last_window (rp_current_group, screen);
+  return group_last_window (rp_current_group[screen->xine_screen_num], screen);
 }
 
 
@@ -597,7 +597,7 @@ get_window_list (char *fmt, char *delim, struct sbuf *buffer,
   find_window_other (current_screen());
 
   /* We only loop through the current group to look for windows. */
-  list_for_each_entry (we,&rp_current_group->mapped_windows,node)
+  list_for_each_entry (we,&rp_current_group[current_screen()->xine_screen_num]->mapped_windows,node)
     {
       PRINT_DEBUG (("%d-%s\n", we->number, window_name (we->win)));
 
@@ -624,7 +624,7 @@ get_window_list (char *fmt, char *delim, struct sbuf *buffer,
 
       /* Only put the delimiter between the windows, and not after the the last
          window. */
-      if (delim && we->node.next != &rp_current_group->mapped_windows)
+      if (delim && we->node.next != &rp_current_group[current_screen()->xine_screen_num]->mapped_windows)
         sbuf_concat (buffer, delim);
 
       if (we->win == current_window())

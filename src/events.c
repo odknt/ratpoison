@@ -48,7 +48,7 @@ show_rudeness_msg (rp_window *win, int raised)
 {
   rp_group *g = groups_find_group_by_window (win);
   rp_window_elem *elem = group_find_window (&g->mapped_windows, win);
-  if (g == rp_current_group)
+  if (g == rp_current_group[win->scr->xine_screen_num])
     {
       if (win->transient)
         marked_message_printf (0, 0, raised ? MESSAGE_RAISE_TRANSIENT:MESSAGE_MAP_TRANSIENT,
