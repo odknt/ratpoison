@@ -310,37 +310,22 @@ handler (Display *d, XErrorEvent *e)
 void
 set_sig_handler (int sig, void (*action)(int))
 {
-  /* use sigaction because SVR4 systems do not replace the signal
-    handler by default which is a tip of the hat to some god-aweful
-    ancient code.  So use the POSIX sigaction call instead. */
   struct sigaction act;
 
-  /* check setting for sig */
-  if (sigaction (sig, NULL, &act))
+  memset (&act, 0, sizeof (act));
+  act.sa_handler = action;
+  sigemptyset (&act.sa_mask);
+  if (sigaction (sig, &act, NULL))
     {
-      PRINT_ERROR (("Error %d fetching SIGALRM handler\n", errno ));
-    }
-  else
-    {
-      /* if the existing action is to ignore then leave it intact
-         otherwise add our handler */
-      if (act.sa_handler != SIG_IGN)
-        {
-          act.sa_handler = action;
-          sigemptyset(&act.sa_mask);
-          act.sa_flags = 0;
-          if (sigaction (sig, &act, NULL))
-            {
-              PRINT_ERROR (("Error %d setting SIGALRM handler\n", errno ));
-            }
-        }
+      PRINT_ERROR (("Error setting signal handler: %s\n",
+                    strerror (errno)));
     }
 }
 
 static void
 print_version (void)
 {
-  printf ("%s %s (built %s %s)\n", PACKAGE, VERSION, __DATE__, __TIME__);
+  printf ("%s %s\n", PACKAGE, VERSION);
   printf ("Copyright (C) 2000-2008 Shawn Betts\n\n");
 
   exit (EXIT_SUCCESS);
@@ -446,38 +431,37 @@ read_startup_files (const char *alt_rcfile)
     }
   else
     {
-      /* first check $HOME/.ratpoisonrc and if that does not exist then try
-         $sysconfdir/ratpoisonrc */
       const char *homedir;
+      char *filename;
 
+      /* first check $HOME/.ratpoisonrc */
       homedir = get_homedir ();
-
       if (!homedir)
         PRINT_ERROR (("ratpoison: no home directory!?\n"));
       else
         {
-          char *filename;
           filename = xsprintf ("%s/.ratpoisonrc", homedir);
+          fileptr = fopen (filename, "r");
+          if (fileptr == NULL && errno != ENOENT)
+            PRINT_ERROR (("ratpoison: could not open %s (%s)\n",
+                          filename, strerror (errno)));
+          free (filename);
+        }
 
-          if ((fileptr = fopen (filename, "r")) == NULL)
-            {
-              if (errno != ENOENT)
-                PRINT_ERROR (("ratpoison: could not open %s (%s)\n",
-                              filename, strerror (errno)));
+      if (fileptr == NULL)
+        {
+          /* couldn't open $HOME/.ratpoisonrc, fall back on system config */
+          filename = xsprintf ("%s/ratpoisonrc", SYSCONFDIR);
 
-              free (filename);
-              filename = xsprintf ("%s/ratpoisonrc", SYSCONFDIR);
-
-              if ((fileptr = fopen (filename, "r")) == NULL)
-                if (errno != ENOENT)
-                    PRINT_ERROR (("ratpoison: could not open %s (%s)\n",
-                                  filename, strerror (errno)));
-            }
+          fileptr = fopen (filename, "r");
+          if (fileptr == NULL && errno != ENOENT)
+            PRINT_ERROR (("ratpoison: could not open %s (%s)\n",
+                          filename, strerror (errno)));
           free (filename);
         }
     }
 
-  if (fileptr)
+  if (fileptr != NULL)
     {
       set_close_on_exec (fileno (fileptr));
       read_rc_file (fileptr);
@@ -634,9 +618,7 @@ main (int argc, char *argv[])
   myargv = argv;
   while (1)
     {
-      int option_index = 0;
-
-      c = getopt_long (argc, argv, ratpoison_opts, ratpoison_longopts, &option_index);
+      c = getopt_long (argc, argv, ratpoison_opts, ratpoison_longopts, NULL);
       if (c == -1) break;
 
       switch (c)
