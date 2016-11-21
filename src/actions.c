@@ -3883,7 +3883,7 @@ static cmdret *
 set_padding (struct cmdarg **args)
 {
   rp_frame *frame;
-  int l, t, r, b, i;
+  int l, t, r, b, i, j;
   long workarea[4];
 
   if (args[0] == NULL)
@@ -3903,38 +3903,40 @@ set_padding (struct cmdarg **args)
 
   /* Resize the frames to make sure they are not too big and not too
      small. */
-  list_for_each_entry (frame,&(current_screen()->frames),node)
-    {
-      int bk_pos, bk_len;
+  for (j = 0; j < num_screens; j++) {
+    list_for_each_entry (frame,&(screens[j].frames),node)
+      {
+        int bk_pos, bk_len;
 
-      /* Resize horizontally. */
-      bk_pos = frame->x;
-      bk_len = frame->width;
+        /* Resize horizontally. */
+        bk_pos = frame->x;
+        bk_len = frame->width;
 
-      if (frame->x == defaults.padding_left)
-        {
-          frame->x = l;
-          frame->width += bk_pos - l;
-        }
+        if (frame->x == defaults.padding_left)
+          {
+            frame->x = l;
+            frame->width += bk_pos - l;
+          }
 
-      if ((bk_pos + bk_len) == (current_screen()->left + current_screen()->width - defaults.padding_right))
-        frame->width = current_screen()->left + current_screen()->width - r - frame->x;
+        if ((bk_pos + bk_len) == (screens[j].left + screens[j].width - defaults.padding_right))
+          frame->width = screens[j].left + screens[j].width - r - frame->x;
 
-      /* Resize vertically. */
-      bk_pos = frame->y;
-      bk_len = frame->height;
+        /* Resize vertically. */
+        bk_pos = frame->y;
+        bk_len = frame->height;
 
-      if (frame->y == defaults.padding_top)
-        {
-          frame->y = t;
-          frame->height += bk_pos - t;
-        }
+        if (frame->y == defaults.padding_top)
+          {
+            frame->y = t;
+            frame->height += bk_pos - t;
+          }
 
-      if ((bk_pos + bk_len) == (current_screen()->top + current_screen()->height - defaults.padding_bottom))
-        frame->height = current_screen()->top + current_screen()->height - b - frame->y;
+        if ((bk_pos + bk_len) == (screens[j].top + screens[j].height - defaults.padding_bottom))
+          frame->height = screens[j].top + screens[j].height - b - frame->y;
 
-      maximize_all_windows_in_frame (frame);
-    }
+        maximize_all_windows_in_frame (frame);
+      }
+  }
 
   defaults.padding_left   = l;
   defaults.padding_right  = r;
