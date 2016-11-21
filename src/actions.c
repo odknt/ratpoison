@@ -3843,19 +3843,20 @@ static cmdret *
 set_font (struct cmdarg **args)
 {
 #ifdef USE_XFT_FONT
+  int i;
   XftFont *font;
-  rp_screen *s = current_screen ();
+  for (i = 0; i < num_screens; i++) {
+    if (args[0] == NULL)
+      return cmdret_new (RET_SUCCESS, "%s", defaults.font_string);
 
-  if (args[0] == NULL)
-    return cmdret_new (RET_SUCCESS, "%s", defaults.font_string);
+    font = XftFontOpenName (dpy, screens[i].screen_num, ARG_STRING (0));
 
-  font = XftFontOpenName (dpy, s->screen_num, ARG_STRING (0));
+    if (font == NULL)
+      return cmdret_new (RET_FAILURE, "set font: unknown font");
 
-  if (font == NULL)
-    return cmdret_new (RET_FAILURE, "set font: unknown font");
-
-  XftFontClose (dpy, s->xft_font);
-  s->xft_font = font;
+    XftFontClose (dpy, screens[i].xft_font);
+    screens[i].xft_font = font;
+  }
 #else
   XFontSet font;
 
