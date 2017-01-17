@@ -26,25 +26,25 @@
 int
 frame_left (rp_frame *frame)
 {
-  return frame->x;
+  return frames_screen(frame)->left + frame->x;
 }
 
 int
 frame_top (rp_frame *frame)
 {
-  return frame->y;
+  return frames_screen(frame)->top + frame->y;
 }
 
 int
 frame_right (rp_frame *frame)
 {
-  return frame->x + frame->width;
+  return frames_screen(frame)->left + frame->x + frame->width;
 }
 
 int
 frame_bottom (rp_frame *frame)
 {
-  return frame->y + frame->height;
+  return frames_screen(frame)->top + frame->y + frame->height;
 }
 
 int
